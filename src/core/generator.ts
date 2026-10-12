@@ -6,7 +6,7 @@ import {
 import { Rng } from './rng.ts';
 import { Track, buildSegment, type Segment, type SegmentSpec } from './track.ts';
 import {
-  checkJump, checkOverlap, checkSpikeChallenge, minObstacleGap, spikeLandingZone, validateRange,
+  checkJump, checkOverlap, checkSpikeChallenge, laneRampFlight, minObstacleGap, spikeLandingZone, validateRange,
   type Issue,
 } from './validate.ts';
 
@@ -172,13 +172,13 @@ export class Generator {
     }
     const sf = this.speedFactor(end);
     const L = this.level(end);
-    const recovery = () => this.rng.range(20, 50) * sf;
+    const recovery = () => this.rng.range(15, 35) * sf;
     if (plan.name === 'spikes' || plan.name === 'jump') {
       if (plan.name === 'spikes') this.stats.spikes++;
       // la zona de aterrizaje ya está incluida en el grupo: recuperación y nada más
       this.lastHazardEnd = end;
       this.nextSingleS = end + recovery();
-      this.nextComboS = Math.max(this.nextComboS, end + this.rng.range(40, 90) * sf);
+      this.nextComboS = Math.max(this.nextComboS, end + this.rng.range(25, 60) * sf);
       this.nextSpecialS = end + this.rng.range(190 - 40 * L, 300 - 60 * L) * sf;
       this.afterJump = true;
       return;
@@ -186,7 +186,7 @@ export class Generator {
     if (plan.hazard) {
       this.lastHazardEnd = lastObs;
       this.nextSingleS = Math.max(lastObs + recovery(), lastObs + minObstacleGap(baseSpeedAt(lastObs)));
-      this.nextComboS = lastObs + this.rng.range(80 - 15 * L, 150 - 30 * L) * sf;
+      this.nextComboS = lastObs + this.rng.range(50 - 10 * L, 110 - 30 * L) * sf;
     } else if (lastObs > -Infinity) {
       this.lastHazardEnd = lastObs;
       this.nextSingleS = lastObs + this.singleGap(lastObs);
@@ -196,7 +196,7 @@ export class Generator {
 
   private singleGap(s: number) {
     const L = this.level(s);
-    const gap = this.rng.range(40 - 5 * L, 82 - 17 * L) * this.speedFactor(s);
+    const gap = this.rng.range(26 - 4 * L, 55 - 12 * L) * this.speedFactor(s);
     return Math.max(gap, minObstacleGap(baseSpeedAt(s)) + 4);
   }
 
@@ -208,7 +208,7 @@ export class Generator {
     if (attempt >= 3) return this.rng.chance(0.5) ? this.straight() : this.curve();
     if (s >= SAFE_ZONE) {
       if (s >= this.nextSpecialS) {
-        if (s > 1500 && this.rng.chance(0.08)) return this.jump();
+        if (s > 1500 && this.rng.chance(0.04)) return this.jump();
         return this.spikes();
       }
       if (s >= this.nextComboS && !this.afterJump) {
@@ -315,24 +315,31 @@ export class Generator {
       const v = baseSpeedAt(cur);
       const k = Math.round(cur - seg.s0);
       const kappa = Math.max(Math.abs(seg.kappa[Math.max(0, k - 4)] ?? 0), Math.abs(seg.kappa[Math.min(seg.kappa.length - 1, k + 4)] ?? 0), Math.abs(seg.kappa[k] ?? 0));
-      if (kappa * v * v > 0.56 * GRIP || (this.afterJump && cur < this.lastHazardEnd + 40)) {
+      if (kappa * v * v > 0.62 * GRIP || (this.afterJump && cur < this.lastHazardEnd + 40)) {
         cur += 6;
         continue;
       }
       const lvl = this.level(cur);
-      if (this.rng.chance(0.82 + 0.15 * lvl)) {
+      if (this.rng.chance(0.93 + 0.07 * lvl)) {
         let lane = this.rng.int(0, 2);
         if (lane === lastLane && this.rng.chance(0.6)) lane = (lane + 1 + this.rng.int(0, 1)) % 3;
         lastLane = lane;
-        const tires = this.rng.chance(0.3);
-        seg.obstacles.push({
-          id: this.objId++, kind: tires ? 'tires' : 'block',
-          s0: cur, s1: cur + (tires ? 1.2 : 1.6), width: 2.9, height: tires ? 0.7 : 2.2,
-          baseD: LANES[lane], amp: 0, omega: 0, phase: 0,
-        });
+        // a veces la fila bloquea dos carriles (más con la dificultad)
+        const lanes = [lane];
+        if (this.rng.chance(0.25 + 0.2 * lvl)) lanes.push((lane + 1 + this.rng.int(0, 1)) % 3);
+        for (const ln of lanes) this.pushBlock(seg, cur, ln);
       }
       cur += this.singleGap(cur);
     }
+  }
+
+  private pushBlock(seg: Segment, s: number, lane: number) {
+    const tires = this.rng.chance(0.3);
+    seg.obstacles.push({
+      id: this.objId++, kind: tires ? 'tires' : 'block',
+      s0: s, s1: s + (tires ? 1.2 : 1.6), width: 2.9, height: tires ? 0.7 : 2.2,
+      baseD: LANES[lane], amp: 0, omega: 0, phase: 0,
+    });
   }
 
   // Distancia desde el comienzo del grupo para respetar la separación con el peligro previo.
@@ -345,9 +352,9 @@ export class Generator {
     const v = baseSpeedAt(s + 50);
     const lvl = this.level(s);
     const lead = Math.ceil(Math.max(8, this.leadFrom(s, minObstacleGap(v) + 4)));
-    const rows = this.rng.int(2, 3 + Math.round(lvl));
+    const rows = this.rng.int(3, 4 + Math.round(lvl));
     const spacing: number[] = [];
-    for (let k = 1; k < rows; k++) spacing.push(v * this.rng.range(1.15, 1.6));
+    for (let k = 1; k < rows; k++) spacing.push(v * this.rng.range(1.0, 1.4));
     const body = spacing.reduce((a, b) => a + b, 0) + 2;
     let L = Math.ceil(lead + body + 8);
     // la mitad de las combinaciones va sobre una curva suave: esquivar y doblar a la vez
@@ -447,6 +454,24 @@ export class Generator {
         });
         // monedas que marcan el carril de la rampa (terminan antes de que empiece)
         this.coinLine(seg, r0 - 22, 4, LANES[lane]);
+        // Pasillo de aterrizaje: el carril de la rampa queda libre para el vuelo más largo
+        // (con nitro); los otros dos se llenan de bloques apenas termina el vuelo normal.
+        const others = [0, 1, 2].filter((k) => k !== lane);
+        const rEnd = r0 + LANE_RAMP_LENGTH;
+        let cur = rEnd + laneRampFlight(baseSpeedAt(rEnd)) + 12;
+        const end = seg.s0 + seg.length - 4;
+        while (cur < end) {
+          const lanes = this.rng.chance(0.55) ? others : [this.rng.pick(others)];
+          // bloques de pasillo: más angostos y corridos hacia afuera, para no invadir el
+          // carril de la rampa aunque se haya saltado desde su borde
+          for (const ln of lanes) {
+            seg.obstacles.push({
+              id: this.objId++, kind: 'block', s0: cur, s1: cur + 1.6, width: 2.2, height: 2.2,
+              baseD: LANES[ln] + Math.sign(LANES[ln] - LANES[lane]) * 0.25, amp: 0, omega: 0, phase: 0,
+            });
+          }
+          cur += baseSpeedAt(cur) * this.rng.range(0.55, 0.9);
+        }
       },
     };
   }

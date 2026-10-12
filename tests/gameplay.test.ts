@@ -185,10 +185,17 @@ describe('5-11. pinchos en los tres carriles + rampa de un carril', () => {
           assert.ok(LANES.some((c) => Math.abs(c - r.d) < 1e-9), 'centrada en un carril');
           assert.ok(Math.abs(r.d) + r.width / 2 <= TRACK_HALF_WIDTH, 'dentro de la calzada');
           assert.equal(seg.spec.turn, 0, 'en recta');
-          // zona de aterrizaje libre para el vuelo más largo posible (con nitro)
+          // pasillo de aterrizaje: el carril de la rampa libre para el vuelo más largo (nitro);
+          // los otros dos carriles, libres al menos hasta el aterrizaje a velocidad normal
           const clear = r.s1 + laneRampFlight(baseSpeedAt(r.s1) * NITRO_MULT);
+          const baseLand = r.s1 + laneRampFlight(baseSpeedAt(r.s1));
           assert.ok(seg.s0 + seg.length >= clear, 'la recta continúa tras el aterrizaje');
-          for (const q of seg.obstacles) if (q !== o) assert.ok(q.s0 < r.s0 || q.s0 > clear, 'aterrizaje libre');
+          for (const q of seg.obstacles) {
+            if (q === o || q.s0 < r.s0) continue;
+            assert.ok(q.s0 > baseLand, 'nada donde aterriza a velocidad normal');
+            const gapToLane = Math.abs(q.baseD - r.d) - q.width / 2;
+            if (q.s0 < clear) assert.ok(gapToLane >= r.width / 2 + CAR_WIDTH / 2, 'carril de la rampa libre (aunque salte desde el borde)');
+          }
         }
         assert.ok(seg.ramps.every((r) => seg.obstacles.some((o) => o.kind === 'spikes' && o.s0 >= r.s1)), 'ninguna rampa suelta');
       }
@@ -284,7 +291,7 @@ describe('5-11. pinchos en los tres carriles + rampa de un carril', () => {
 });
 
 describe('12-13. obstáculos mucho más frecuentes, sin combinaciones imposibles', () => {
-  it('media entre desafíos ≤ 90 m (generador anterior: 188–591 m) y pocos tramos vacíos', () => {
+  it('media entre desafíos ≤ 55 m (antes 73 m; generador original: 188–591 m) y pocos tramos vacíos', () => {
     for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
       const track = new Track();
       const gen = new Generator(track, seed);
@@ -294,7 +301,7 @@ describe('12-13. obstáculos mucho más frecuentes, sin combinaciones imposibles
       const ev = [...new Set(starts)].sort((a, b) => a - b);
       const gaps = ev.slice(1).map((x, i) => x - ev[i]);
       const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-      assert.ok(avg <= 90, `semilla ${seed}: media ${avg.toFixed(0)} m`);
+      assert.ok(avg <= 55, `semilla ${seed}: media ${avg.toFixed(0)} m`);
       assert.ok(gaps.filter((g) => g > 150).length / gaps.length < 0.16, 'casi siempre hay algo que anticipar');
       assert.ok(Math.max(...gaps) < 650, `tramo vacío máximo ${Math.max(...gaps)} m`);
       assert.ok(ev[0] < SAFE_ZONE + 220, `el primer desafío llega pronto (s=${ev[0]})`);
@@ -414,7 +421,9 @@ describe('14-18. nitro ×3', () => {
       const block = seg.obstacles.filter((o) => o.kind === 'block').sort((a, b) => a.s0 - b.s0)[0];
       const v = baseSpeedAt(block.s0) * NITRO_MULT;
       const car = createCar();
-      placeCar(car, track, Math.max(seg.s0 + 0.5, block.s0 - 30));
+      // arranca después de la fila anterior que comparta ese carril
+      const prev = seg.obstacles.filter((o) => o.s1 < block.s0 && Math.abs(o.baseD - block.baseD) < 2.5);
+      placeCar(car, track, Math.max(seg.s0 + 0.5, block.s0 - 30, ...prev.map((o) => o.s1 + CAR_LENGTH / 2 + 0.5)));
       car.d = block.baseD;
       car.v = v;
       for (let t = 0; t < 3 && car.mode === 'ground'; t += FIXED_DT) stepCar(car, track, NONE, FIXED_DT, v, t);

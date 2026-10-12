@@ -389,19 +389,26 @@ describe('navegador', { timeout: 600_000 }, () => {
     const r = await page.evaluate(() => {
       const c = window.__curva, g = c.game, s = g.sim;
       g.pause();
-      const find = () => s.track.segments.find((q) => q.kind === 'curve' && Math.abs(q.spec.turn) > 0.45 && q.obstacles.every((o) => o.s0 > q.s0 + 70) && q.s0 > s.car.s + 10);
-      let cv = find();
+      // curva cerrada por delante; se vacía de obstáculos (y se redibuja) para aislar la dirección
+      const find = () => s.track.segments.find((q) => q.kind === 'curve' && Math.abs(q.spec.turn) > 0.45 && q.s0 > s.car.s + 150);
+      let cv = null;
       while ((!cv || s.car.s < cv.s0) && s.status === 'running') {
+        if (!cv && (cv = find())) {
+          const i = s.track.segments.indexOf(cv);
+          const cleared = s.track.segments.slice(i, i + 2);
+          for (const q of cleared) q.obstacles.length = 0;
+          g.trackView.sync([], cleared);
+          g.trackView.sync(cleared, []);
+        }
         s.step(1 / 120, c.autopilot(s));
-        cv = cv ?? find();
       }
       // soltar el volante y dejar que vuelva al centro (~0,11 s); desde ahí nadie toca el rumbo
       for (let k = 0; k < 30; k++) s.step(1 / 120, { steer: 0, nitro: false, jump: false });
-      const psi = s.car.psi;
+      const psi = s.car.psi, d0 = s.car.d;
       let shot = false;
       while (s.car.mode === 'ground' && s.status === 'running') {
         s.step(1 / 120, { steer: 0, nitro: false, jump: false });
-        if (!shot && Math.abs(s.car.d) > 3.4) {
+        if (!shot && Math.abs(s.car.d - d0) > 1.5) {
           shot = true;
           g.rig.snap(s.pose); g.phase = 'playing'; g['present'](1 / 60); g['present'](1 / 60); g.phase = 'paused';
         }
@@ -410,7 +417,7 @@ describe('navegador', { timeout: 600_000 }, () => {
     });
     await page.screenshot({ path: 'tests/shots/curva-sin-girar.png' });
     assert.ok(r.psiSame, 'el rumbo no cambió solo');
-    assert.ok(r.drifted, 'la curva se escapó: el auto llegó al borde de la calzada');
+    assert.ok(r.drifted, 'la curva se escapó: el auto se desvió más de 1,5 m de su carril');
     assert.ok(r.mode === 'falling' ? r.reason === 'side' : r.mode === 'crashed', `terminó en ${r.mode} (${r.reason})`);
     await page.close();
   });

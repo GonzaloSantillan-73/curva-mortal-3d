@@ -1,7 +1,7 @@
 import {
   CAR_LENGTH, CAR_WIDTH, FIXED_DT, GRAVITY, HEIGHT_LIMIT, LANES, LANE_RAMP_RISE, LANE_RAMP_VY_MAX,
   LANE_WIDTH, MAX_GRADE, MAX_HEADING, MIN_TRACK_WIDTH, NITRO_MULT, SAFE_ZONE, SPIKE_HEIGHT,
-  START_STRAIGHT, baseSpeedAt, laneChangeDistance, requiredRadius,
+  START_STRAIGHT, baseSpeedAt, laneChangeDistance, requiredRadius, yawMax,
 } from './config.ts';
 import { createCar, placeCar, stepCar, type CarInput, type CarState } from './physics.ts';
 import { Track, emptyPoint, type LaneRamp, type Obstacle, type Segment } from './track.ts';
@@ -106,13 +106,15 @@ interface Interval { a: number; b: number }
 
 // Separación mínima entre filas de obstáculos de grupos distintos (tiempo para verlas).
 export function minObstacleGap(v: number): number {
-  return Math.max(20, v * 0.9);
+  return Math.max(16, v * 0.7);
 }
 
 // Pendiente lateral (metros laterales por metro de avance) que permite la dirección
 // real a velocidad base. Derivada del cambio de carril con giro + contragiro al máximo.
 function lateralSlope(v: number, kappa: number): number {
-  return LANE_WIDTH / laneChangeDistance(v, LANE_WIDTH, kappa);
+  // basada en un desplazamiento corto (2 m): el tiempo de girar el volante no se achica
+  // con un 35 % de margen sobre el giro perfecto: tiene que ser posible para una persona
+  return 2 / (laneChangeDistance(v, 2, kappa) * 1.35);
 }
 
 function spikesFor(seg: Segment, r: LaneRamp): Obstacle | undefined {
@@ -157,7 +159,7 @@ export function checkObstacleWindow(track: Track, i: number, issues: Issue[]) {
   if (!obstacles.length && !ramps.length) return;
   const hw = track.halfWidth;
   const lim = hw - 0.6;
-  const margin = 0.15;
+  const margin = 0.45; // nada exige pasar a centímetros de un obstáculo
   const pt = emptyPoint();
   let reach: Interval[] = [{ a: -lim, b: lim }];
   let lockUntil = -Infinity;
@@ -286,21 +288,34 @@ export function spikeLandingZone(rampEnd: number): number {
   return laneRampFlight(baseSpeedAt(rampEnd) * NITRO_MULT) + 25;
 }
 
-function runSpikes(track: Track, seg: Segment, r: LaneRamp, sp: Obstacle, v: number, d: number, jumpBefore: number | null): CarState {
+// Devuelve el auto al final y el punto donde aterrizó (NaN si no aterrizó).
+function runSpikes(track: Track, seg: Segment, r: LaneRamp, sp: Obstacle, v: number, d: number,
+  jumpBefore: number | null, until: number): { car: CarState; landedAt: number } {
   const car = createCar();
   placeCar(car, track, Math.max(seg.s0 + 1, r.s0 - 30));
   car.d = d;
   car.v = v;
   const input: CarInput = { steer: 0, nitro: false, jump: false };
+  const p = emptyPoint();
   let jumped = false;
-  for (let t = 0; t < 6; t += FIXED_DT) {
+  let landedAt = NaN;
+  for (let t = 0; t < 8; t += FIXED_DT) {
     input.jump = false;
     if (jumpBefore !== null && !jumped && car.mode === 'ground' && car.s >= sp.s0 - jumpBefore) input.jump = jumped = true;
+    // tras aterrizar, el conductor vuelve al centro del carril de la rampa (el pasillo libre)
+    if (car.mode === 'ground' && car.s > sp.s1) {
+      if (Number.isNaN(landedAt)) landedAt = car.s;
+      track.sample(car.s, p);
+      const vv = Math.max(car.v, 1);
+      const vdWant = Math.max(-8, Math.min(8, (r.d - car.d) * 3));
+      const alphaWant = -Math.asin(Math.max(-0.35, Math.min(0.35, vdWant / vv)));
+      input.steer = Math.max(-1, Math.min(1, -(p.kappa * vv + (alphaWant - (car.psi - p.theta)) * 4.5) / yawMax(car.v)));
+    }
     stepCar(car, track, input, FIXED_DT, v, t);
     if (car.mode === 'falling' || car.mode === 'crashed') break;
-    if (car.mode === 'ground' && car.s > sp.s1 + CAR_LENGTH) break;
+    if (car.mode === 'ground' && car.s > until) break;
   }
-  return car;
+  return { car, landedAt };
 }
 
 // El desafío pinchos + rampa se prueba con la física real:
@@ -316,21 +331,26 @@ export function checkSpikeChallenge(track: Track, seg: Segment): JumpReport {
     if (sp.height < SPIKE_HEIGHT - EPS) failures.push('barrera más baja que el salto con botón');
     const vBase = baseSpeedAt(r.s1);
     const landEnd = r.s1 + spikeLandingZone(r.s1) - 20;
-    const obstaclesAfter = seg.obstacles.some((o) => o !== sp && o.s0 > r.s0 && o.s0 < landEnd);
-    if (obstaclesAfter || landEnd > seg.s0 + seg.length) failures.push('zona de aterrizaje insuficiente u ocupada');
+    // Pasillo de aterrizaje: el carril de la rampa queda libre hasta el vuelo más largo (nitro);
+    // los otros dos carriles, sólo hasta el aterrizaje a velocidad normal.
+    const baseLand = r.s1 + laneRampFlight(vBase) + 8;
+    const inLane = (o: Obstacle) => Math.abs(o.baseD - r.d) < o.width / 2 + o.amp + r.width / 2 + CAR_WIDTH / 2 - 0.2;
+    const occupied = seg.obstacles.some((o) => o !== sp && o.s0 > r.s0 && (o.s0 < baseLand || (inLane(o) && o.s0 < landEnd)));
+    if (occupied || landEnd > seg.s0 + seg.length) failures.push('zona de aterrizaje insuficiente u ocupada');
     for (const v of [vBase, vBase * NITRO_MULT]) {
       for (const off of [0, -(r.width / 2 - 0.3), r.width / 2 - 0.3]) {
         scenarios++;
-        const car = runSpikes(track, seg, r, sp, v, r.d + off, null);
+        // recorre todo el pasillo: aterriza y sigue sin chocar los bloques laterales
+        const { car, landedAt } = runSpikes(track, seg, r, sp, v, r.d + off, null, landEnd);
         const label = `v=${v.toFixed(1)} d=${(r.d + off).toFixed(2)}`;
-        if (car.mode !== 'ground') failures.push(`${label}: con la rampa terminó en ${car.mode} (obj ${car.hitObstacle} s=${car.s.toFixed(1)} rampa ${r.id} ${r.s0}-${r.s1} pinchos ${sp.id} ${sp.s0})`);
-        else if (car.s > landEnd) failures.push(`${label}: aterrizó en s=${car.s.toFixed(1)}, fuera de la zona libre`);
+        if (car.mode !== 'ground') failures.push(`${label}: con la rampa terminó en ${car.mode} (obj ${car.hitObstacle} s=${car.s.toFixed(1)})`);
+        else if (!(landedAt <= landEnd)) failures.push(`${label}: aterrizó en s=${landedAt.toFixed(1)}, fuera de la zona libre`);
       }
     }
     const other = LANES.find((c) => Math.abs(c - r.d) > 1)!;
     for (const jump of [null, 2, 5, 9, 14]) {
       scenarios++;
-      const car = runSpikes(track, seg, r, sp, vBase, other, jump);
+      const { car } = runSpikes(track, seg, r, sp, vBase, other, jump, sp.s1 + CAR_LENGTH);
       if (car.mode !== 'crashed') failures.push(`sin rampa (salto=${jump ?? 'no'}) superó la barrera`);
     }
   }

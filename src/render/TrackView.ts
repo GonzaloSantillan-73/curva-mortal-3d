@@ -251,7 +251,10 @@ export class TrackView {
         shadow.position.set(0, 0.025, 0.5);
         shadow.renderOrder = 1;
         mesh.add(shadow);
-      } else if (o.kind === 'block') mesh = new THREE.Mesh(this.blockGeo, this.blockMats);
+      } else if (o.kind === 'block') {
+        mesh = new THREE.Mesh(this.blockGeo, this.blockMats);
+        mesh.scale.x = o.width / 2.9; // la malla mide lo mismo que el colisionador
+      }
       else if (o.kind === 'tires') mesh = new THREE.Mesh(this.tireGeo, this.tireMat);
       else {
         const g = new THREE.Group();
