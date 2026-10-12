@@ -6,7 +6,7 @@ import '@fontsource/barlow/600.css';
 import './style.css';
 import { Game, type HudState, type RunResult } from './Game.ts';
 import { InputManager } from './InputManager.ts';
-import { StorageManager, type Quality } from './StorageManager.ts';
+import { StorageManager, type PadSize, type Quality } from './StorageManager.ts';
 import { autopilot } from './core/autopilot.ts';
 import { validateTrack } from './core/validate.ts';
 import { emptyPoint } from './core/track.ts';
@@ -172,6 +172,23 @@ $('btn-settings').addEventListener('click', () => show('settings'));
 
 const startQuality = StorageManager.getQuality();
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name=quality]')) r.checked = r.value === startQuality;
+// tamaño de los controles táctiles: se aplica al instante y se recuerda
+const PAD_PX: Record<PadSize, number> = { s: 60, m: 72, l: 88, xl: 104 };
+function applyPadSize(p: PadSize) {
+  document.querySelector<HTMLElement>('.pads')?.style.setProperty('--pad-size', PAD_PX[p] + 'px');
+  document.getElementById('hud')?.style.setProperty('--pad-size', PAD_PX[p] + 'px');
+}
+const startPad = StorageManager.getPadSize();
+applyPadSize(startPad);
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name=padsize]')) {
+  r.checked = r.value === startPad;
+  r.addEventListener('change', () => {
+    const p = r.value as PadSize;
+    StorageManager.setPadSize(p);
+    applyPadSize(p);
+  });
+}
+
 const chkDebug = $('chk-debug') as HTMLInputElement;
 
 function setDebug(on: boolean) {

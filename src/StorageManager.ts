@@ -18,6 +18,7 @@ function write(key: string, value: string) {
 }
 
 export type Quality = 'low' | 'medium' | 'high';
+export type PadSize = 's' | 'm' | 'l' | 'xl';
 
 export const StorageManager = {
   getHighScore(): number {
@@ -33,5 +34,12 @@ export const StorageManager = {
   },
   setQuality(q: Quality) {
     write('curva_mortal_quality', q);
+  },
+  getPadSize(): PadSize {
+    const v = read('curva_mortal_padsize');
+    return v === 's' || v === 'm' || v === 'l' || v === 'xl' ? v : 'm';
+  },
+  setPadSize(p: PadSize) {
+    write('curva_mortal_padsize', p);
   },
 };

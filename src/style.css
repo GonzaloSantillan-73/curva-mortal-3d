@@ -363,12 +363,16 @@ kbd {
   opacity: 1;
 }
 
-/* controles táctiles: abajo, a los costados, sin tapar el centro de la ruta */
+/* controles táctiles: abajo, a los costados, sin tapar el centro de la ruta.
+   --pad-lift deja libre la franja inferior (barra del navegador, marca de agua del hosting);
+   --pad-size lo elige el jugador en Ajustes. */
 .pads {
+  --pad-size: 72px;
+  --pad-lift: 78px;
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: calc(14px + var(--safe-b));
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--pad-lift) + var(--safe-b));
   display: none;
   justify-content: space-between;
   align-items: flex-end;
@@ -376,17 +380,22 @@ kbd {
 
 @media (pointer: coarse) {
   .pads { display: flex; }
-  .tip { bottom: calc(110px + var(--safe-b)); }
+  .tip { bottom: calc(var(--pad-lift, 78px) + var(--pad-size, 72px) + 24px + var(--safe-b)); }
+}
+
+/* horizontal: pantalla baja, se sube un poco menos para no comerse la ruta */
+@media (orientation: landscape) and (max-height: 500px) {
+  .pads { --pad-lift: 62px; }
 }
 
 .pad-group {
   display: flex;
-  gap: 10px;
+  gap: calc(var(--pad-size) * 0.14);
 }
 
 .pad {
-  width: 72px;
-  height: 72px;
+  width: var(--pad-size);
+  height: var(--pad-size);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -394,7 +403,7 @@ kbd {
   border-radius: 6px;
   background: rgba(29, 27, 24, 0.5);
   color: var(--paper);
-  font: 700 15px/1 var(--display);
+  font: 700 calc(var(--pad-size) * 0.21) / 1 var(--display);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   pointer-events: auto;
@@ -402,8 +411,8 @@ kbd {
 }
 
 .pad svg {
-  width: 30px;
-  height: 30px;
+  width: calc(var(--pad-size) * 0.42);
+  height: calc(var(--pad-size) * 0.42);
   fill: none;
   stroke: currentColor;
   stroke-width: 3;
@@ -685,4 +694,16 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* pantallas bajas (celular en horizontal): las tarjetas nunca se cortan, se desplazan */
+.card {
+  max-height: calc(100% - 24px - var(--safe-b));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* en horizontal el aviso va arriba, entre la placa y la pausa: no choca con los controles */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  .tip { top: calc(18px + env(safe-area-inset-top, 0px)); bottom: auto; }
 }
