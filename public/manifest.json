@@ -1,0 +1,13 @@
+{
+  "name": "Curva Mortal",
+  "short_name": "Curva Mortal",
+  "description": "Manejá por un viaducto sin fin. No te vayas a la banquina.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f1e7d3",
+  "theme_color": "#1d1b18",
+  "orientation": "any",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

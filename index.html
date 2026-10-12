@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#1d1b18" />
+    <title>Curva Mortal</title>
+    <link rel="manifest" href="/manifest.json" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="ui">
+      <!-- Menú principal -->
+      <section id="menu" class="screen is-active" aria-label="Menú principal">
+        <div class="sheet">
+          <p class="kicker">Viaducto Las Lajas <span>·</span> tramo sin fin</p>
+          <h1 class="title">
+            <svg class="title-sign" viewBox="0 0 100 100" aria-hidden="true">
+              <rect x="15" y="15" width="70" height="70" rx="6" transform="rotate(45 50 50)" fill="#e8b230" stroke="#1d1b18" stroke-width="5"/>
+              <path d="M38 70 V52 Q38 38 52 38 H58" fill="none" stroke="#1d1b18" stroke-width="8" stroke-linecap="square"/>
+              <path d="M56 28 L68 38 L56 48 Z" fill="#1d1b18"/>
+            </svg>
+            <span class="t1">Curva</span><span class="t2">Mortal</span>
+          </h1>
+          <p class="record">Mejor marca <b id="menu-best">0</b> m</p>
+          <div class="actions">
+            <button id="btn-play" class="btn btn-go">Arrancar <span class="arrow" aria-hidden="true"></span></button>
+            <button id="btn-settings" class="btn-link">Ajustes</button>
+          </div>
+          <ul class="keys">
+            <li><kbd>←</kbd><kbd>→</kbd> volante</li>
+            <li><kbd>Espacio</kbd> salto</li>
+            <li><kbd>Shift</kbd> nitro ×3 (mantener)</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Durante la partida -->
+      <section id="hud" class="screen" aria-label="Indicadores">
+        <div class="plate">
+          <div class="plate-dist"><b id="hud-dist">0</b><small>m</small></div>
+          <div class="plate-row">
+            <span class="speed"><b id="hud-speed">0</b> km/h</span>
+            <span class="coins"><i class="coin" aria-hidden="true"></i><b id="hud-coins">0</b></span>
+          </div>
+          <div class="plate-nitro" id="hud-nitro" aria-label="Energía de nitro"><span>Nitro</span><i><b id="hud-nitro-fill"></b></i></div>
+        </div>
+        <div id="speedfx" class="speedfx" aria-hidden="true"></div>
+        <button id="btn-pause" class="btn-square" aria-label="Pausa"><i></i><i></i></button>
+        <div id="countdown" class="countdown"></div>
+        <p id="hud-tip" class="tip"></p>
+
+        <div class="pads">
+          <div class="pad-group">
+            <button class="pad" data-pad="left" aria-label="Izquierda"><svg viewBox="0 0 24 24"><path d="M15 4 L7 12 L15 20" /></svg></button>
+            <button class="pad" data-pad="right" aria-label="Derecha"><svg viewBox="0 0 24 24"><path d="M9 4 L17 12 L9 20" /></svg></button>
+          </div>
+          <div class="pad-group">
+            <button class="pad pad-round" data-pad="jump">Salto</button>
+            <button class="pad pad-round pad-nitro" data-pad="nitro" id="pad-nitro"><span>Nitro</span></button>
+          </div>
+        </div>
+        <pre id="debug-panel" class="debug-panel" hidden></pre>
+      </section>
+
+      <!-- Pausa -->
+      <section id="pause" class="screen screen-dim" aria-label="Pausa">
+        <div class="card">
+          <p class="card-kicker">Parada técnica</p>
+          <h2>En pausa</h2>
+          <div class="actions">
+            <button id="btn-resume" class="btn btn-go">Seguir</button>
+            <button id="btn-restart" class="btn">Empezar de nuevo</button>
+            <button id="btn-quit" class="btn-link">Volver al menú</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Fin de partida -->
+      <section id="over" class="screen screen-dim" aria-label="Fin de la partida">
+        <div class="card">
+          <p class="card-kicker" id="over-kicker">Fin del recorrido</p>
+          <h2 id="over-title">Te fuiste a la banquina</h2>
+          <dl class="ledger">
+            <div><dt>Distancia</dt><dd><span id="over-dist">0</span> m</dd></div>
+            <div><dt>Monedas</dt><dd id="over-coins">0</dd></div>
+            <div><dt>Mejor marca</dt><dd><span id="over-best">0</span> m</dd></div>
+          </dl>
+          <p id="over-stamp" class="stamp" hidden>Nueva marca</p>
+          <div class="actions">
+            <button id="btn-retry" class="btn btn-go">Otra vez</button>
+            <button id="btn-home" class="btn-link">Volver al menú</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Ajustes -->
+      <section id="settings" class="screen screen-dim" aria-label="Ajustes">
+        <div class="card">
+          <p class="card-kicker">Taller</p>
+          <h2>Ajustes</h2>
+          <fieldset class="segmented">
+            <legend>Calidad gráfica</legend>
+            <label><input type="radio" name="quality" value="low" /><span>Baja</span></label>
+            <label><input type="radio" name="quality" value="medium" /><span>Media</span></label>
+            <label><input type="radio" name="quality" value="high" /><span>Alta</span></label>
+          </fieldset>
+          <label class="check"><input type="checkbox" id="chk-debug" /> <span>Vista de depuración <small>(F2)</small></span></label>
+          <p class="note">Cambiar la calidad recarga el juego.</p>
+          <div class="actions">
+            <button id="btn-close-settings" class="btn btn-go">Listo</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
