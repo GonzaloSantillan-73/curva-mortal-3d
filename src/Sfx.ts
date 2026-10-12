@@ -127,6 +127,25 @@ export class Sfx {
     }
   }
 
+  // Vuelve a la ruta: dos notas que suben.
+  respawn() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    for (const [k, f] of [[0, 520], [0.12, 780]]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t + k);
+      g.gain.linearRampToValueAtTime(0.18, t + k + 0.02);
+      g.gain.linearRampToValueAtTime(0, t + k + 0.2);
+      osc.connect(g).connect(this.master!);
+      osc.start(t + k);
+      osc.stop(t + k + 0.22);
+    }
+  }
+
   // Impacto de misil: estallido grave.
   boom() {
     this.burst(700, 0.9, 0.9);

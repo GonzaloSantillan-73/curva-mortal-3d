@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview --port 4173",
-    "test": "node --test tests/core.test.ts tests/gameplay.test.ts tests/heli.test.ts",
+    "test": "node --test tests/core.test.ts tests/gameplay.test.ts tests/heli.test.ts tests/lives.test.ts",
     "test:browser": "node --test --test-concurrency=1 tests/browser.test.mjs"
   },
   "devDependencies": {

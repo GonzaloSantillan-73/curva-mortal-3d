@@ -130,8 +130,17 @@ export const MISSILE_HEIGHT = 3;        // la explosión no se salta
 export const MISSILE_COOLDOWN_MIN = 3;
 export const MISSILE_COOLDOWN_MAX = 6;
 
+// --- Vidas ---
+export const LIVES = 3;
+export const RESPAWN_CRASH_TIME = 1.5;    // giro en el aire hasta el lugar seguro
+export const RESPAWN_DROP_TIME = 0.7;     // se lo ve caer un instante…
+export const RESPAWN_FLY_TIME = 2.0;      // …y vuelve en una burbuja
+export const RESPAWN_HOP = 4.5;           // altura del giro en el aire
+export const INVULNERABLE_TIME = 2.2;     // protección después de reaparecer
+export const RESPAWN_CLEAR_TIME = 1.6;    // segundos de carril libre por delante al reaparecer
+
 // --- Freno ---
 export const BRAKE_MIN_SPEED = 30 / 3.6;  // nunca menos de 30 km/h
-export const BRAKE_DECEL = 12;            // m/s²: baja de a poco
+export const BRAKE_DECEL = 38;            // m/s²: frenada fuerte y bien notoria
 export const BRAKE_CLEAR = 80;            // sin efecto a menos de esto de un salto o rampa
 export const CALTROP_REACTION = 0.6;   // segundos de reacción humana que se descuentan al validar

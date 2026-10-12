@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { autopilot } from '../src/core/autopilot.ts';
 import {
-  ATTACK_GAP, BRAKE_DECEL, BRAKE_MIN_SPEED, CALTROP_HEIGHT, CAR_LENGTH, CAR_WIDTH, FIXED_DT, HELI_ALT,
+  ATTACK_GAP, BRAKE_DECEL, LIVES, BRAKE_MIN_SPEED, CALTROP_HEIGHT, CAR_LENGTH, CAR_WIDTH, FIXED_DT, HELI_ALT,
   HELI_ENTER_ALT, HELI_START, LANES, LANE_WIDTH, MISSILE_ALT, MISSILE_MARK_TIME, MISSILE_START, START_S,
   TRACK_HALF_WIDTH, baseSpeedAt, laneChangeDistance,
 } from '../src/core/config.ts';
@@ -160,6 +160,7 @@ describe('helicópteros: ataques coordinados y siempre esquivables', () => {
     it(`semilla ${seed}${'nitro' in opts ? ' con nitro' : ''}${'brakeEvery' in opts ? ' frenando a ratos' : ''}: 6 km`, () => {
       const r = run(seed, 6000, opts);
       assert.notEqual(r.sim.status, 'over', `el piloto automático chocó en s=${r.sim.car.s.toFixed(0)}`);
+      assert.equal(r.sim.lives, LIVES, 'no perdió ninguna vida');
       assert.equal(r.offRoute, 0, 'nunca se salen de la ruta (curvas incluidas)');
       assert.equal(r.overlap, 0, 'nunca atacan los dos a la vez');
       assert.equal(r.blocked3, 0, 'nunca quedan los tres carriles cerrados');
@@ -227,7 +228,7 @@ describe('helicópteros: ataques coordinados y siempre esquivables', () => {
       sim.car.v = v;
       sim.car.d = same ? zone.baseD : LANES.find((l) => Math.abs(l - zone.baseD) > 3)!;
       let impactFront = NaN;
-      while (sim.status !== 'over' && sim.car.s < zone.s1 + 10 && sim.car.mode !== 'crashed') {
+      while (sim.status !== 'over' && sim.car.s < zone.s1 + 10 && !sim.recovery) {
         sim.step(FIXED_DT, { steer: 0, nitro: false, jump: false });
         for (const e of sim.drainEvents()) if (e.type === 'heli' && e.what === 'impact') impactFront = sim.car.s + CAR_LENGTH / 2;
         sim.drainSegmentChanges();
@@ -257,11 +258,12 @@ describe('pinchos arrojados: colisión', () => {
 
   it('pasar por encima pincha: choque contra los pinchos', () => {
     const { sim, o } = withCaltrop(1);
-    while (sim.status !== 'over' && sim.car.s < o.s1 + 20) {
+    while (sim.status !== 'over' && sim.car.s < o.s1 + 20 && !sim.recovery) {
       sim.step(FIXED_DT, { steer: 0, nitro: false, jump: false });
       drain(sim);
     }
     assert.equal(sim.car.reason, 'crash');
+    assert.equal(sim.lives, LIVES - 1);
     assert.equal(sim.car.hitObstacle, o.id);
   });
 
@@ -284,6 +286,7 @@ describe('pinchos arrojados: colisión', () => {
       drain(sim);
     }
     assert.notEqual(sim.car.mode, 'crashed');
+    assert.equal(sim.lives, LIVES);
   });
 
   it('reiniciar la partida borra helicópteros, pinchos y misiles', () => {

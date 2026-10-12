@@ -132,13 +132,14 @@ describe('navegador', { timeout: 600_000 }, () => {
     await page.close();
   });
 
-  it('4/8. salirse de la pista: caída con motivo correcto y pantalla final', async () => {
+  it('4/8. salirse de la pista tres veces: vuelve en burbuja dos veces y a la tercera, pantalla final', async () => {
     const page = await open();
     await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     await page.keyboard.down('ArrowRight');
-    await page.waitForFunction(() => window.__curva.screen() === 'over', null, { timeout: 15000 });
+    await page.waitForFunction(() => window.__curva.screen() === 'over', null, { timeout: 45000 });
     await page.keyboard.up('ArrowRight');
+    assert.equal(await page.locator('#hud-lives .life.is-lost').count(), 3, 'los tres corazones perdidos');
     const s = await state(page);
     assert.equal(s.reason, 'side');
     assert.equal(s.phase, 'over');
@@ -682,6 +683,65 @@ describe('navegador', { timeout: 600_000 }, () => {
     const r = await page.evaluate(() => ({ steer: window.__curva.input.steer, brake: window.__curva.input.brake }));
     await page.mouse.up();
     assert.ok(r.steer > 0.5 && r.brake, JSON.stringify(r));
+    await page.close();
+  });
+
+  it('vidas: choque con giro y parpadeo, caída con burbuja, corazones y "otra vez" con 3 vidas (capturas)', async () => {
+    const page = await open({ width: 390, height: 844 }, '?seed=5', true);
+    await play(page);
+    await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
+    assert.equal(await page.locator('#hud-lives .life:not(.is-lost)').count(), 3);
+    // un bloque justo adelante en su carril
+    const crash = await page.evaluate(() => {
+      const c = window.__curva, g = c.game, s = g.sim;
+      g['stopLoop']();
+      s.track.dropped.push({ id: 900001, kind: 'block', s0: s.car.s + 30, s1: s.car.s + 31.6, width: 2.9, height: 2.2, baseD: s.car.d, amp: 0, omega: 0, phase: 0 });
+      let n = 0;
+      while (!s.recovery && n++ < 2000) { g.advance(1 / 60); g['present'](1 / 60); }
+      for (let k = 0; k < 40; k++) { g.advance(1 / 60); g['present'](1 / 60); }
+      return { lives: s.lives, recovering: !!s.recovery, roll: s.pose.roll, y: s.pose.y };
+    });
+    assert.equal(crash.lives, 2);
+    assert.ok(crash.recovering && crash.roll > 0.5, 'gira en el aire');
+    await page.screenshot({ path: 'tests/shots/vida-choque-giro.png' });
+    await page.waitForFunction(() => document.querySelectorAll('#hud-lives .life.is-lost').length === 1);
+    const after = await page.evaluate(() => {
+      const c = window.__curva, g = c.game, s = g.sim;
+      let n = 0;
+      while (s.recovery && n++ < 2000) { g.advance(1 / 60); g['present'](1 / 60); }
+      return { mode: s.car.mode, protectedFor: s.invulnerable, blinkHidden: (() => { let hidden = 0; for (let k = 0; k < 20; k++) { g.advance(1 / 60); g['present'](1 / 60); if (!g.carView.root.visible) hidden++; } return hidden; })() };
+    });
+    assert.equal(after.mode, 'ground');
+    assert.ok(after.blinkHidden > 3, 'parpadea mientras está protegido');
+    // caída: sale por el costado y vuelve en burbuja
+    const fall = await page.evaluate(() => {
+      const c = window.__curva, g = c.game, s = g.sim;
+      c.input.override = { steer: 1, nitro: false };
+      let n = 0;
+      while (!(s.recovery && s.recovery.phase === 'fly') && n++ < 4000) { g.advance(1 / 60); g['present'](1 / 60); }
+      c.input.override = { steer: 0, nitro: false };
+      for (let k = 0; k < 50; k++) { g.advance(1 / 60); g['present'](1 / 60); }
+      return { lives: s.lives, bubble: g['bubble'].visible, kind: s.recovery?.kind };
+    });
+    assert.equal(fall.lives, 1);
+    assert.ok(fall.bubble && fall.kind === 'fall', 'vuelve en una burbuja');
+    await page.screenshot({ path: 'tests/shots/vida-burbuja.png' });
+    // tercera: fin de partida, y "otra vez" vuelve con tres vidas
+    await page.evaluate(() => {
+      const c = window.__curva, g = c.game, s = g.sim;
+      let n = 0;
+      while (s.recovery && n++ < 4000) { g.advance(1 / 60); g['present'](1 / 60); }
+      c.input.override = { steer: 1, nitro: false };
+      n = 0;
+      while (s.status !== 'over' && n++ < 8000) { g.advance(1 / 60); g['present'](1 / 60); }
+      c.input.override = null;
+    });
+    await page.waitForFunction(() => window.__curva.screen() === 'over');
+    assert.match(await page.textContent('#over-kicker'), /Sin vidas/);
+    await page.screenshot({ path: 'tests/shots/vida-fin.png' });
+    await page.click('#btn-retry');
+    assert.equal(await page.evaluate(() => window.__curva.game.sim.lives), 3);
+    assert.equal(await page.locator('#hud-lives .life.is-lost').count(), 0);
     await page.close();
   });
 

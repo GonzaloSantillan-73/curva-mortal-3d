@@ -22,8 +22,9 @@ import {
 //  · air:    y, vy integran gravedad. Aterriza cuando y cruza la superficie sólida.
 //  · falling: sin apoyo posible. Coordenadas del mundo, balística pura.
 //  · crashed: choque contra un obstáculo o el costado de una rampa.
+//  · respawn: volviendo a la ruta tras perder una vida (lo mueve la simulación, no la física).
 
-export type CarMode = 'ground' | 'air' | 'falling' | 'crashed';
+export type CarMode = 'ground' | 'air' | 'falling' | 'crashed' | 'respawn';
 export type EndReason = 'side' | 'gap' | 'crash' | null;
 
 export interface CarInput {
@@ -193,7 +194,8 @@ function rampVy(r: LaneRamp, s: number, sRate: number) {
 }
 
 // Un paso fijo. `targetSpeed` lo decide la simulación (0 durante la cuenta regresiva).
-export function stepCar(car: CarState, track: Track, input: CarInput, dt: number, targetSpeed: number, time: number) {
+// `ghost`: protección tras reaparecer, atraviesa obstáculos sin chocar.
+export function stepCar(car: CarState, track: Track, input: CarInput, dt: number, targetSpeed: number, time: number, ghost = false) {
   const hw = track.halfWidth;
   const p = scratchA;
 
@@ -324,7 +326,7 @@ export function stepCar(car: CarState, track: Track, input: CarInput, dt: number
     }
   }
 
-  const hit = hitsObstacle(track, car, sPrev, car.s, time);
+  const hit = ghost ? null : hitsObstacle(track, car, sPrev, car.s, time);
   if (hit) {
     car.mode = 'crashed';
     car.reason = 'crash';
@@ -338,7 +340,7 @@ export function stepCar(car: CarState, track: Track, input: CarInput, dt: number
     if (car.y <= q.h + 0.01) car.y = q.h;
     return;
   }
-  const wall = hitsRampSide(track, car);
+  const wall = ghost ? null : hitsRampSide(track, car);
   if (wall) {
     car.mode = 'crashed';
     car.reason = 'crash';

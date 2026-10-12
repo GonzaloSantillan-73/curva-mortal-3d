@@ -33,6 +33,9 @@ export interface HudState {
   nitroReady: boolean;   // hay energía suficiente para encenderlo
   braking: boolean;
   brakeBlocked: boolean; // pulsado cerca de un salto: no frena
+  lives: number;
+  recovering: boolean;   // volviendo a la ruta (controles sin efecto)
+  protected: boolean;    // protección tras reaparecer
 }
 
 export interface RunResult {
@@ -67,6 +70,8 @@ export class Game {
   carView: CarView | TwoWheelView;
   vehicle: VehicleKind = 'car';
   private shadows: boolean;
+  private bubble: THREE.Mesh;
+  private bubblePop = 0;
   readonly env: Environment;
   readonly debug = new DebugView();
   readonly dust: Dust;
@@ -80,6 +85,7 @@ export class Game {
   onHud?: (h: HudState) => void;
   onOver?: (r: RunResult) => void;
   onHeli?: (who: 'caltrops' | 'missiles', what: 'enter' | 'warn' | 'drop' | 'mark' | 'fire' | 'impact') => void;
+  onLife?: (lives: number, cause: 'crash' | 'fall') => void;
 
   private input: InputManager;
   private container: HTMLElement;
@@ -113,6 +119,18 @@ export class Game {
     this.heliView = new HeliView(this.sim.track, shadows, 'caltrops');
     this.missileHeliView = new HeliView(this.sim.track, shadows, 'missiles');
     this.missileView = new MissileView(this.sim.track);
+    this.bubble = new THREE.Mesh(
+      new THREE.SphereGeometry(2.9, 28, 20),
+      new THREE.MeshStandardMaterial({ color: 0xbfe6ff, emissive: 0x2a5d7a, transparent: true, opacity: 0.3, roughness: 0.05, metalness: 0.2, depthWrite: false }),
+    );
+    // reflejo: un óvalo blanco arriba a un costado
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false }));
+    shine.scale.set(1, 0.55, 0.3);
+    shine.position.set(-1.3, 1.7, 1.6);
+    this.bubble.add(shine);
+    this.bubble.renderOrder = 2;
+    this.bubble.visible = false;
+    this.scene.add(this.bubble);
     this.scene.add(this.trackView.root, this.carView.root, this.carView.shadow, this.dust.root, this.heliView.root,
       this.missileHeliView.root, this.missileView.root, this.debug.root);
     this.resize();
@@ -183,6 +201,31 @@ export class Game {
     }
   }
 
+  // Burbuja que trae al vehículo de vuelta a la ruta después de una caída.
+  private updateBubble(dt: number) {
+    const rec = this.sim.recovery;
+    const flying = rec?.kind === 'fall' && rec.phase === 'fly';
+    const b = this.bubble;
+    const mat = b.material as THREE.MeshStandardMaterial;
+    if (flying) {
+      b.visible = true;
+      this.bubblePop = 0;
+      const k = 1 + Math.sin(this.sim.time * 7) * 0.04;
+      b.scale.set(k, 1 / k, k);
+      mat.opacity = 0.3;
+    } else if (this.bubblePop > 0) {
+      this.bubblePop = Math.max(0, this.bubblePop - dt);
+      const k = 1 + (0.3 - this.bubblePop) * 2;
+      b.scale.setScalar(k);
+      mat.opacity = 0.3 * (this.bubblePop / 0.3);
+      b.visible = this.bubblePop > 0;
+    } else {
+      b.visible = false;
+    }
+    const r = this.renderPose;
+    b.position.set(r.x, r.y + 1.0, r.z);
+  }
+
   // Cambia el vehículo que se dibuja. La física es la misma para los tres.
   setVehicle(kind: VehicleKind) {
     if (kind === this.vehicle) return;
@@ -209,6 +252,8 @@ export class Game {
     this.heliView.clear();
     this.missileHeliView.clear();
     this.missileView.clear();
+    this.bubble.visible = false;
+    this.bubblePop = 0;
     Object.assign(this.renderPose, this.sim.pose);
     this.applyPose(0);
     this.rig.snap(this.renderPose);
@@ -313,6 +358,11 @@ export class Game {
         this.sfx.crash();
       }
       if (e.type === 'nitro') this.sfx.nitro(e.on);
+      if (e.type === 'life') this.onLife?.(e.lives, e.cause);
+      if (e.type === 'respawn') {
+        if (this.bubble.visible) this.bubblePop = 0.3; // la burbuja se rompe al llegar
+        this.sfx.respawn();
+      }
       if (e.type === 'launch') this.sfx.launch();
       if (e.type === 'heli') this.onHeli?.(e.who, e.what);
       if (e.type === 'heli' && (e.what === 'warn' || e.what === 'mark')) this.sfx.alert();
@@ -323,6 +373,7 @@ export class Game {
     this.applyPose(this.stepper.alpha);
     const falling = sim.car.mode === 'falling';
     this.rig.update(dt, this.renderPose, falling, sim.nitroActive ? 1 : 0, sim.car.v);
+    this.updateBubble(dt);
     this.dust.update(dt);
     this.trackView.update(sim.time);
     this.heliView.update(sim.heli, this.stepper.alpha, sim.time, sim.car.v);
@@ -342,6 +393,9 @@ export class Game {
       nitroReady: sim.nitroActive || sim.nitroEnergy >= NITRO_MIN_START,
       braking: sim.braking,
       brakeBlocked: sim.brakeBlocked,
+      lives: sim.lives,
+      recovering: !!sim.recovery,
+      protected: sim.invulnerable > 0,
     });
 
     if (sim.status === 'over') {
@@ -383,7 +437,12 @@ export class Game {
     if (car.mode !== 'falling' && this.sim.track.sample(r.s, this.probe) && this.probe.solid && Math.abs(r.d) <= this.sim.track.halfWidth) {
       ground = this.probe.h;
     }
-    this.carView.update(r, this.sim.nitroActive, ground, car.mode === 'air', this.sim.time);
+    this.carView.update(r, this.sim.nitroActive, ground && car.mode !== 'respawn' ? ground : null, car.mode === 'air', this.sim.time);
+    // parpadeo: durante el giro tras un choque y mientras dura la protección
+    const blink = this.sim.recovery?.kind === 'crash' || this.sim.invulnerable > 0;
+    const on = !blink || Math.floor(this.sim.time * 14) % 2 === 0;
+    this.carView.root.visible = on;
+    if (!on) this.carView.shadow.visible = false;
     this.focus.set(r.x, r.y, r.z);
   }
 

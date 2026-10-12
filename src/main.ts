@@ -57,6 +57,8 @@ function startRun() {
   window.clearTimeout(tipTimer);
   $('hud-tip').classList.remove('is-on');
   lastHud = '';
+  lastLives = '';
+  for (const el of lifeEls) el.classList.remove('is-hit', 'is-lost');
   show('hud');
   runs++;
   game.sfx.unlock();
@@ -114,6 +116,27 @@ const probeDbg = emptyPoint();
 let lastNitro = '';
 let lastBrake = '';
 const elPadBrake = $('pad-brake');
+const elLives = $('hud-lives');
+const lifeEls = [...elLives.querySelectorAll<HTMLElement>('.life')];
+let lastLives = '';
+function showLives(lives: number, guard: boolean) {
+  const key = `${lives}|${guard}`;
+  if (key === lastLives) return;
+  const before = lastLives ? Number(lastLives.split('|')[0]) : lives;
+  lastLives = key;
+  lifeEls.forEach((el, i) => {
+    const lost = i >= lives;
+    // la que se acaba de perder: animación de golpe
+    if (lost && i < before) {
+      el.classList.remove('is-hit');
+      void el.offsetWidth;
+      el.classList.add('is-hit');
+    }
+    el.classList.toggle('is-lost', lost);
+  });
+  elLives.classList.toggle('is-protected', guard);
+  elLives.setAttribute('aria-label', lives === 1 ? '1 vida' : `${lives} vidas`);
+}
 
 game.onHud = (h: HudState) => {
   const key = `${Math.floor(h.distance)}|${Math.round(h.speedKmh)}|${h.coins}|${h.countdown > 0 ? Math.ceil(h.countdown * 2) : 0}`;
@@ -141,6 +164,7 @@ game.onHud = (h: HudState) => {
     }
     elSpeedFx.classList.toggle('is-on', h.nitro);
   }
+  showLives(h.lives, h.protected);
   const bk = `${h.braking}|${h.brakeBlocked}`;
   if (bk !== lastBrake) {
     lastBrake = bk;
@@ -162,6 +186,12 @@ game.onHud = (h: HudState) => {
       `gen      ok ${s.gen.stats.groups}  desc ${s.gen.stats.rejected}  emerg ${s.gen.stats.fallbacks + s.emergencies}`,
     ].join('\n');
   }
+};
+
+game.onLife = (lives, cause) => {
+  if (lives === 0) return;
+  const why = cause === 'fall' ? 'Te caíste' : 'Choque';
+  tip(`${why}: te ${lives === 1 ? 'queda 1 vida' : `quedan ${lives} vidas`}`, 2200);
 };
 
 game.onHeli = (who, what) => {
@@ -187,7 +217,7 @@ game.onOver = (r: RunResult) => {
   if (record) StorageManager.setHighScore(dist);
   const key = r.reason === 'crash' && (r.hit === 'spikes' || r.hit === 'ramp' || r.hit === 'caltrops' || r.hit === 'missile') ? r.hit : r.reason ?? 'side';
   const [kicker, title] = TITLES[key] ?? TITLES.side;
-  $('over-kicker').textContent = kicker;
+  $('over-kicker').textContent = `Sin vidas · ${kicker}`;
   $('over-title').textContent = title;
   $('over-dist').textContent = fmt.format(dist);
   $('over-coins').textContent = String(r.coins);

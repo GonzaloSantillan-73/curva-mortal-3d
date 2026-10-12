@@ -174,7 +174,7 @@ export function autopilot(sim: Simulation, opts: AutopilotOptions = {}): CarInpu
   const track = sim.track;
   const hw = track.halfWidth;
   const input: CarInput = { steer: 0, nitro: false, jump: false };
-  if (car.mode === 'falling' || car.mode === 'crashed') return input;
+  if (car.mode === 'falling' || car.mode === 'crashed' || car.mode === 'respawn') return input;
 
   let target = 0;
   const look = Math.max(140, car.v * 5);

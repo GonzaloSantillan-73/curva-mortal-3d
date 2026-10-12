@@ -1,5 +1,6 @@
 import {
-  ATTACK_GAP, BRAKE_CLEAR, BRAKE_MIN_SPEED, COUNTDOWN, CRASH_TIME, FALL_DEPTH, FALL_TIME, KEEP_BEHIND, NITRO_COIN, NITRO_DURATION,
+  ATTACK_GAP, BRAKE_CLEAR, BRAKE_MIN_SPEED, CALTROP_DEPTH, CALTROP_HEIGHT, CALTROP_WIDTH, CAR_LENGTH, COUNTDOWN, CRASH_TIME,
+  INVULNERABLE_TIME, LANES, LIVES, RESPAWN_CLEAR_TIME, RESPAWN_CRASH_TIME, RESPAWN_DROP_TIME, RESPAWN_FLY_TIME, RESPAWN_HOP, FALL_DEPTH, FALL_TIME, KEEP_BEHIND, NITRO_COIN, NITRO_DURATION,
   NITRO_MIN_START, NITRO_MULT, NITRO_RECHARGE, START_S, baseSpeedAt, requiredAhead,
 } from './config.ts';
 import { Generator } from './generator.ts';
@@ -9,7 +10,8 @@ import {
   computePose, createCar, emptyPose, placeCar, stepCar,
   type CarInput, type CarPose, type CarState, type EndReason,
 } from './physics.ts';
-import { Track, emptyPoint, type LaneRamp, type Segment } from './track.ts';
+import { Track, emptyPoint, type LaneRamp, type Obstacle, type Segment } from './track.ts';
+import { findSafeSpot } from './respawn.ts';
 import { validateTrack, type Issue } from './validate.ts';
 
 export type SimStatus = 'countdown' | 'running' | 'over';
@@ -22,9 +24,34 @@ export type SimEvent =
   | { type: 'nitro'; on: boolean }
   | { type: 'heli'; who: 'caltrops' | 'missiles'; what: 'enter' | 'warn' | 'drop' | 'mark' | 'fire' | 'impact' }
   | { type: 'fall'; reason: EndReason }
+  | { type: 'life'; lives: number; cause: 'crash' | 'fall' }
+  | { type: 'respawn' }
   | { type: 'over'; reason: EndReason };
 
 const JUMP_BUFFER = 0.12;
+
+export interface Recovery {
+  kind: 'crash' | 'fall';
+  phase: 'drop' | 'fly';
+  t: number;
+  dur: number;
+  past: number;          // reaparece por delante de esto (lo que lo golpeó)
+  fromS: number;
+  fromD: number;
+  fromX: number;
+  fromY: number;
+  fromZ: number;
+  fromYaw: number;
+  toS: number;
+  toD: number;
+}
+
+function angleDiff(a: number, b: number) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
 const TURN_WAIT = 12;
 
 export class Simulation {
@@ -38,6 +65,11 @@ export class Simulation {
   // Freno: el jugador lo mantiene pulsado; cerca de saltos y rampas no actúa.
   braking = false;
   brakeBlocked = false;
+  // Vidas: cada choque o caída descuenta una (una sola por impacto). Mientras quedan,
+  // el vehículo vuelve solo a un carril seguro y sigue; con la última, fin de partida.
+  lives = LIVES;
+  invulnerable = 0;          // segundos de protección que quedan
+  recovery: Recovery | null = null;
   readonly pose: CarPose = emptyPose();
   readonly prevPose: CarPose = emptyPose();
   status: SimStatus = 'countdown';
@@ -73,6 +105,9 @@ export class Simulation {
     this.heli.reset(seed);
     this.missiles.reset(seed);
     this.lastAttackEnd = -Infinity;
+    this.lives = LIVES;
+    this.invulnerable = 0;
+    this.recovery = null;
     this.attackWas = null;
     this.lastAttacker = null;
     this.braking = false;
@@ -147,6 +182,11 @@ export class Simulation {
     if (this.status === 'over') return;
     Object.assign(this.prevPose, this.pose);
     const car = this.car;
+    if (this.recovery && this.recovery.phase === 'fly') {
+      // volviendo a la ruta: los controles no hacen nada
+      this.stepRecovery(dt);
+      return;
+    }
     if (input.jump) this.jumpBuffer = JUMP_BUFFER;
     const ci = this.carInput;
     const live = this.status === 'running';
@@ -160,8 +200,9 @@ export class Simulation {
     ci.jump = live && this.jumpBuffer > 0 && car.mode === 'ground';
     const modeBefore = car.mode;
 
-    stepCar(car, this.track, ci, dt, this.speedTarget(this.nitroActive, this.braking), this.time);
+    stepCar(car, this.track, ci, dt, this.speedTarget(this.nitroActive, this.braking), this.time, this.invulnerable > 0);
     this.time += dt;
+    this.invulnerable = Math.max(0, this.invulnerable - dt);
     if (this.jumpBuffer > 0) this.jumpBuffer = car.mode === 'ground' ? this.jumpBuffer - dt : 0;
 
     if (this.status === 'countdown') {
@@ -183,6 +224,13 @@ export class Simulation {
     if (modeBefore !== car.mode) {
       if (car.mode === 'falling') this.events.push({ type: 'fall', reason: car.reason });
       if (car.mode === 'crashed') this.events.push({ type: 'crash' });
+      // un solo descuento por impacto: sólo en el paso en que empieza el choque o la caída
+      if (car.mode === 'falling' || car.mode === 'crashed') this.loseLife(car.mode === 'crashed' ? 'crash' : 'fall');
+    }
+    // cayendo antes de volver en la burbuja
+    if (this.recovery?.phase === 'drop') {
+      this.recovery.t += dt;
+      if (this.recovery.t >= RESPAWN_DROP_TIME || car.y < car.lastGroundY - 12) this.beginFly();
     }
 
     this.collectCoins();
@@ -191,8 +239,9 @@ export class Simulation {
 
     if (this.status === 'running') this.minAhead = Math.min(this.minAhead, this.ahead);
 
-    const fellOut = car.mode === 'falling' && (car.y < car.lastGroundY - FALL_DEPTH || car.fallTime > FALL_TIME);
-    const crashed = car.mode === 'crashed' && car.crashTime > CRASH_TIME;
+    const last = this.lives === 0;
+    const fellOut = last && car.mode === 'falling' && (car.y < car.lastGroundY - FALL_DEPTH || car.fallTime > FALL_TIME);
+    const crashed = last && car.mode === 'crashed' && car.crashTime > CRASH_TIME;
     if (fellOut || crashed) {
       this.status = 'over';
       if (this.nitroActive) {
@@ -208,7 +257,9 @@ export class Simulation {
   // sólo si el otro no está atacando y pasó ATTACK_GAP desde el último. Cada uno, antes de
   // atacar, comprueba todos los obstáculos y peligros activos (también los del otro).
   private stepHelicopters(dt: number) {
-    const running = this.status === 'running';
+    // mientras el vehículo vuelve a la ruta no empieza ningún ataque (y el que estaba
+    // por soltar pinchos desiste)
+    const running = this.status === 'running' && !this.recovery;
     const car = this.car;
     const rested = () => this.time - this.lastAttackEnd >= ATTACK_GAP;
     // turnos: si los dos están en el aire, el que atacó último espera a que ataque el otro
@@ -229,6 +280,124 @@ export class Simulation {
   // quién estaba atacando al terminar el paso anterior
   private attackWas: 'caltrops' | 'missiles' | null = null;
   private lastAttacker: 'caltrops' | 'missiles' | null = null;
+
+  private loseLife(cause: 'crash' | 'fall') {
+    if (this.status !== 'running' || this.recovery) return;
+    this.lives = Math.max(0, this.lives - 1);
+    this.events.push({ type: 'life', lives: this.lives, cause });
+    if (this.lives === 0) return; // la última: termina como siempre
+    if (this.nitroActive) {
+      this.nitroActive = false;
+      this.events.push({ type: 'nitro', on: false });
+    }
+    this.jumpBuffer = 0;
+    const car = this.car;
+    // lo que lo golpeó, para reaparecer por delante
+    let past = car.s + 8;
+    if (cause === 'crash') {
+      const hit = this.track.obstaclesNear(car.s - 20, car.s + 20, []).find((o) => o.id === car.hitObstacle);
+      const ramp = this.track.rampsNear(car.s - 30, car.s + 30, this.ramps).find((r) => r.id === car.hitObstacle);
+      past = Math.max(past, (hit?.s1 ?? ramp?.s1 ?? car.s) + CAR_LENGTH + 4);
+    }
+    this.recovery = {
+      kind: cause, phase: cause === 'crash' ? 'fly' : 'drop', t: 0, dur: cause === 'crash' ? RESPAWN_CRASH_TIME : RESPAWN_FLY_TIME,
+      past, fromS: car.s, fromD: car.d, fromX: 0, fromY: 0, fromZ: 0, fromYaw: 0, toS: 0, toD: 0,
+    };
+    if (cause === 'crash') this.beginFly();
+  }
+
+  // Elige el lugar seguro y arranca el vuelo (giro en el aire o burbuja).
+  private beginFly() {
+    const r = this.recovery!;
+    const car = this.car;
+    const v = baseSpeedAt(car.s);
+    // pinchos que un helicóptero esté por soltar: ese carril tampoco sirve
+    const extra: Obstacle[] = [];
+    if (this.heli.attacking) {
+      extra.push({
+        id: -1, kind: 'caltrops', s0: this.heli.goal - CALTROP_DEPTH, s1: this.heli.goal + CALTROP_DEPTH,
+        width: CALTROP_WIDTH, height: CALTROP_HEIGHT, baseD: LANES[this.heli.lane], amp: 0, omega: 0, phase: 0,
+      });
+    }
+    const from = r.kind === 'crash' ? r.past : Math.max(r.past, car.s + 10);
+    const spot = findSafeSpot(this.track, from, car.d, Math.max(30, v * RESPAWN_CLEAR_TIME), extra)
+      ?? findSafeSpot(this.track, from, car.d, 25, extra)
+      ?? { s: Math.min(from + 20, this.track.endS - 40), d: 0 };
+    const pose = this.pose;
+    r.phase = 'fly';
+    r.t = 0;
+    r.fromS = car.s;
+    r.fromD = car.d;
+    r.fromX = pose.x;
+    r.fromY = pose.y;
+    r.fromZ = pose.z;
+    r.fromYaw = pose.yaw;
+    r.toS = spot.s;
+    r.toD = spot.d;
+    car.mode = 'respawn';
+    car.v = Math.max(car.v, v * 0.6);
+  }
+
+  // Vuelo de regreso. Choque: avanza siguiendo la ruta (curvas incluidas) mientras gira en el
+  // aire. Caída: vuela en una burbuja desde donde cayó hasta el carril elegido.
+  private stepRecovery(dt: number) {
+    const r = this.recovery!;
+    const car = this.car;
+    const t = this.track;
+    r.t += dt;
+    this.time += dt;
+    const u = Math.min(1, r.t / r.dur);
+    const e = u * u * (3 - 2 * u);
+    const pose = this.pose;
+    const s = r.fromS + (r.toS - r.fromS) * e;
+    const d = r.fromD + (r.toD - r.fromD) * e;
+    t.sample(s, this.probe);
+    const w = { x: 0, y: 0, z: 0 };
+    t.worldAt(s, d, w);
+    if (r.kind === 'crash') {
+      pose.x = w.x;
+      pose.z = w.z;
+      pose.y = w.y + RESPAWN_HOP * Math.sin(Math.PI * u) + 0.4 * (1 - u);
+      pose.yaw = this.probe.theta;
+      pose.roll = Math.PI * 2 * e;          // vuelta completa en el aire
+      pose.pitch = 0.25 * Math.sin(Math.PI * u);
+    } else {
+      // burbuja: del punto de la caída al carril, por el aire
+      const to = { x: 0, y: 0, z: 0 };
+      t.worldAt(r.toS, r.toD, to);
+      pose.x = r.fromX + (to.x - r.fromX) * e;
+      pose.z = r.fromZ + (to.z - r.fromZ) * e;
+      pose.y = r.fromY + (to.y - r.fromY) * e + 7 * Math.sin(Math.PI * u);
+      pose.yaw = r.fromYaw + angleDiff(r.fromYaw, this.probe.theta) * e;
+      pose.roll = 0.18 * Math.sin(r.t * 5);
+      pose.pitch = 0.12 * Math.sin(r.t * 4);
+    }
+    pose.s = s;
+    pose.d = d;
+    pose.steer = 0;
+    pose.wheelTurn += (car.v * dt) / 0.36;
+    car.s = s;
+    car.d = d;
+    car.y = pose.y;
+    this.maintainTrack();
+    this.stepHelicopters(dt);
+    if (u >= 1) this.endRecovery();
+  }
+
+  private endRecovery() {
+    const r = this.recovery!;
+    const car = this.car;
+    const v = baseSpeedAt(r.toS);
+    placeCar(car, this.track, r.toS);
+    car.d = r.toD;
+    car.v = v;
+    this.recovery = null;
+    this.invulnerable = INVULNERABLE_TIME;
+    this.events.push({ type: 'respawn' });
+    computePose(car, this.track, this.pose, 0);
+    // terminó la vuelta completa: 2π ≡ 0, sin desenrollar el giro en el último fotograma
+    if (r.kind === 'crash') this.prevPose.roll -= Math.PI * 2;
+  }
 
   private collectCoins() {
     const car = this.car;

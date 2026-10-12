@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { autopilot } from '../src/core/autopilot.ts';
 import {
   CAR_LENGTH, CAR_WIDTH, COUNTDOWN, FIXED_DT, LAND_TOLERANCE, MAX_FRAME_DT, MIN_AHEAD,
-  SAFE_ZONE, SLAB_THICKNESS, START_S, START_STRAIGHT, TRACK_HALF_WIDTH, baseSpeedAt, requiredAhead,
+  SAFE_ZONE, SLAB_THICKNESS, START_S, START_STRAIGHT, TRACK_HALF_WIDTH, baseSpeedAt, requiredAhead, LIVES,
 } from '../src/core/config.ts';
 import { createCar, placeCar, project, stepCar, type CarInput } from '../src/core/physics.ts';
 import { Simulation } from '../src/core/sim.ts';
@@ -168,6 +168,7 @@ describe('3/4/17-20. sesiones largas con piloto automático', () => {
           drain(sim);
           const car = sim.car;
           assert.notEqual(sim.status, 'over', `terminó en s=${car.s.toFixed(1)} (${car.reason})`);
+          assert.equal(sim.lives, LIVES, `perdió una vida en s=${car.s.toFixed(1)} (${car.reason})`);
           assert.ok(Number.isFinite(car.s + car.d + car.y + car.vy + car.v), 'sin NaN');
           assert.ok(sim.track.segmentAt(car.s), 'el segmento bajo el auto existe');
           sim.track.sample(car.s, p);
