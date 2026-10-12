@@ -19,6 +19,7 @@ function write(key: string, value: string) {
 
 export type Quality = 'low' | 'medium' | 'high';
 export type PadSize = 's' | 'm' | 'l' | 'xl';
+export type SteerMode = 'buttons' | 'tilt';
 
 export const StorageManager = {
   getHighScore(): number {
@@ -41,5 +42,11 @@ export const StorageManager = {
   },
   setPadSize(p: PadSize) {
     write('curva_mortal_padsize', p);
+  },
+  getSteerMode(): SteerMode {
+    return read('curva_mortal_steer') === 'tilt' ? 'tilt' : 'buttons';
+  },
+  setSteerMode(m: SteerMode) {
+    write('curva_mortal_steer', m);
   },
 };

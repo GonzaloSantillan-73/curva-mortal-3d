@@ -107,4 +107,28 @@ export class Sfx {
   crash() {
     this.burst(2600, 0.6, 0.8);
   }
+
+  // Alerta del helicóptero: tres pitidos agudos.
+  alert() {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    for (const [k, f] of [[0, 1320], [0.16, 990], [0.32, 1320]]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t + k);
+      g.gain.linearRampToValueAtTime(0.12, t + k + 0.01);
+      g.gain.linearRampToValueAtTime(0, t + k + 0.13);
+      osc.connect(g).connect(this.master!);
+      osc.start(t + k);
+      osc.stop(t + k + 0.15);
+    }
+  }
+
+  // Los pinchos caen: soplido corto.
+  drop() {
+    this.burst(900, 0.35, 0.3);
+  }
 }

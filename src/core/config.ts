@@ -96,3 +96,24 @@ export function laneChangeDistance(v: number, lateral: number, kappa = 0): numbe
 export function requiredAhead(s: number): number {
   return Math.max(MIN_AHEAD, baseSpeedAt(s + 400) * NITRO_MULT * AHEAD_SECONDS);
 }
+
+// --- Helicóptero que arroja pinchos ---
+// Aparece a los HELI_START metros, baja del cielo y vuela por encima de la ruta (en
+// coordenadas de pista: sigue cada curva). Antes de soltar se ubica sobre un carril y avisa.
+export const HELI_START = 1000;        // metros recorridos
+export const HELI_ALT = 8;             // altura de crucero sobre la calzada
+export const HELI_ENTER_ALT = 75;      // desde dónde baja
+export const HELI_ENTER_TIME = 3.2;
+export const HELI_LEAD_TIME = 4.2;     // va adelante del auto: ~4 s de recorrido…
+export const HELI_LEAD_MIN = 110;      // …nunca menos de 110 m
+export const HELI_LEAD_MAX = 240;
+export const HELI_AIM_TIME = 1.0;      // alerta mínima: tiempo para ubicarse sobre el carril…
+export const HELI_WARN_TIME = 1.2;     // …más este tiempo ya suspendido encima, antes de soltar
+export const HELI_BRAKE = 30;          // m/s² al frenar para quedar suspendido sobre el punto
+export const HELI_COOLDOWN_MIN = 2.5;
+export const HELI_COOLDOWN_MAX = 5;
+export const CALTROP_GRAVITY = 30;
+export const CALTROP_WIDTH = LANE_WIDTH - 0.3;  // ocupa un solo carril
+export const CALTROP_DEPTH = 1.4;
+export const CALTROP_HEIGHT = 0.45;    // se pueden saltar con el botón
+export const CALTROP_REACTION = 0.6;   // segundos de reacción humana que se descuentan al validar

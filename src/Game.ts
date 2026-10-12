@@ -11,6 +11,7 @@ import { CarView } from './render/CarView.ts';
 import { DebugView } from './render/DebugView.ts';
 import { Dust } from './render/Dust.ts';
 import { Environment } from './render/Environment.ts';
+import { HeliView } from './render/HeliView.ts';
 import { TrackView } from './render/TrackView.ts';
 import { Sfx } from './Sfx.ts';
 import type { InputManager } from './InputManager.ts';
@@ -33,7 +34,7 @@ export interface RunResult {
   distance: number;
   coins: number;
   reason: EndReason;
-  hit: 'spikes' | 'ramp' | 'block' | 'tires' | 'mover' | null;
+  hit: 'spikes' | 'ramp' | 'block' | 'tires' | 'mover' | 'caltrops' | null;
 }
 
 export interface LoopStats {
@@ -62,12 +63,14 @@ export class Game {
   readonly env: Environment;
   readonly debug = new DebugView();
   readonly dust: Dust;
+  readonly heliView: HeliView;
   readonly sfx = new Sfx();
   phase: Phase = 'idle';
   stats: LoopStats = { frames: 0, steps: 0, maxStepsInFrame: 0, clampedFrames: 0, loopStarts: 0, activeLoops: 0 };
   lastStartProblems: string[] = [];
   onHud?: (h: HudState) => void;
   onOver?: (r: RunResult) => void;
+  onHeli?: (what: 'enter' | 'warn' | 'drop') => void;
 
   private input: InputManager;
   private container: HTMLElement;
@@ -97,7 +100,8 @@ export class Game {
     this.trackView = new TrackView(this.sim.track, shadows);
     this.carView = new CarView(shadows);
     this.dust = new Dust();
-    this.scene.add(this.trackView.root, this.carView.root, this.carView.shadow, this.dust.root, this.debug.root);
+    this.heliView = new HeliView(this.sim.track, shadows);
+    this.scene.add(this.trackView.root, this.carView.root, this.carView.shadow, this.dust.root, this.heliView.root, this.debug.root);
     this.resize();
   }
 
@@ -177,6 +181,7 @@ export class Game {
     this.debug.rebuild(this.sim);
     if (!this.debug.enabled) this.debug.clear();
     this.dust.clear();
+    this.heliView.clear();
     Object.assign(this.renderPose, this.sim.pose);
     this.applyPose(0);
     this.rig.snap(this.renderPose);
@@ -281,12 +286,16 @@ export class Game {
       }
       if (e.type === 'nitro') this.sfx.nitro(e.on);
       if (e.type === 'launch') this.sfx.launch();
+      if (e.type === 'heli') this.onHeli?.(e.what);
+      if (e.type === 'heli' && e.what === 'warn') this.sfx.alert();
+      if (e.type === 'heli' && e.what === 'drop') this.sfx.drop();
     }
     this.applyPose(this.stepper.alpha);
     const falling = sim.car.mode === 'falling';
     this.rig.update(dt, this.renderPose, falling, sim.nitroActive ? 1 : 0, sim.car.v);
     this.dust.update(dt);
     this.trackView.update(sim.time);
+    this.heliView.update(sim.heli, this.stepper.alpha, sim.time, sim.car.v, this.rig.camera);
     this.debug.update(sim, this.renderPose);
     this.render();
 
@@ -311,6 +320,7 @@ export class Game {
 
   private hitKind(): RunResult['hit'] {
     const id = this.sim.car.hitObstacle;
+    if (this.sim.track.dropped.some((o) => o.id === id)) return 'caltrops';
     if (id < 0) return null;
     for (const seg of this.sim.track.segments) {
       const o = seg.obstacles.find((q) => q.id === id);

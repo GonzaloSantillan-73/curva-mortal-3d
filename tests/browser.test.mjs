@@ -422,6 +422,86 @@ describe('navegador', { timeout: 600_000 }, () => {
     await page.close();
   });
 
+  it('dirección por inclinación: se elige en Ajustes, se recuerda y dobla con el sensor', async () => {
+    const page = await open({ width: 390, height: 844 });
+    await page.click('#btn-settings');
+    await page.click('input[name=steer][value=tilt] + span');
+    const tilt = (beta, gamma) => page.evaluate(([b, g]) => {
+      window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g }));
+    }, [beta, gamma]);
+    // el sensor manda datos todo el tiempo; las flechas se esconden cuando llegan
+    await page.waitForFunction(() => {
+      window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 35, gamma: 0 }));
+      return document.getElementById('hud').classList.contains('steer-tilt');
+    });
+    for (let k = 0; k < 6; k++) await tilt(35, 20);
+    const right = await page.evaluate(() => window.__curva.input.steer);
+    for (let k = 0; k < 6; k++) await tilt(35, -20);
+    const left = await page.evaluate(() => window.__curva.input.steer);
+    assert.ok(right > 0.5 && left < -0.5, `derecha ${right}, izquierda ${left}`);
+    assert.equal(await page.evaluate(() => localStorage.getItem('curva_mortal_steer')), 'tilt');
+    // vuelve a botones: la inclinación deja de influir y vuelven las flechas
+    await page.click('input[name=steer][value=buttons] + span');
+    await tilt(35, 30);
+    assert.equal(await page.evaluate(() => window.__curva.input.steer), 0);
+    assert.equal(await page.evaluate(() => document.getElementById('hud').classList.contains('steer-tilt')), false);
+    await page.close();
+  });
+
+  it('helicóptero a los 1000 m: alerta, pinchos en un carril y título propio al pisarlos (capturas)', async () => {
+    let page = await open({ width: 1280, height: 720 }, '?seed=4');
+    await page.evaluate(() => window.__curva.startRun());
+    const until = (src) => page.evaluate((cond) => {
+      const c = window.__curva, g = c.game, s = g.sim;
+      const f = new Function('s', 'return ' + cond);
+      g['stopLoop']();
+      const render = g.render;
+      g.render = () => {};
+      let n = 0;
+      while (!f(s) && s.status !== 'over' && n++ < 300000) {
+        const i = c.autopilot(s);
+        c.input.override = { steer: i.steer, nitro: false };
+        g.advance(1 / 60);
+        g['present'](1 / 60);
+      }
+      g.render = render;
+      g.render();
+      return { d: s.distance, phase: s.heli.phase, status: s.status, alert: g.heliView['alert'].visible || s.heli.warning };
+    }, src);
+    const before = await until('s.distance > 990');
+    assert.equal(before.phase, 'off', 'antes de los 1000 m no hay helicóptero');
+    const warn = await until('s.heli.phase === "warn" && s.heli.timer > 0.4');
+    assert.equal(warn.status, 'running');
+    assert.ok(warn.alert, 'alerta visible');
+    await page.screenshot({ path: 'tests/shots/heli-alerta.png' });
+    await until('s.track.dropped.length > 0 && s.track.dropped.at(-1).s0 - s.car.s < 12');
+    await page.screenshot({ path: 'tests/shots/heli-pinchos.png' });
+    await page.close();
+
+    // otra vez la misma partida, pero apenas caen los pinchos se va a su carril a propósito
+    page = await open({ width: 1280, height: 720 }, '?seed=4');
+    await page.evaluate(() => window.__curva.startRun());
+    await until('s.heli.history.length > 0');
+    const r = await page.evaluate(() => {
+      const c = window.__curva, g = c.game, s = g.sim;
+      const o = s.track.dropped.at(-1);
+      let n = 0;
+      while (s.status !== 'over' && n++ < 2000) {
+        const vdWant = Math.max(-4, Math.min(4, (o.baseD - s.car.d) * 1.5));
+        c.input.override = { steer: Math.max(-1, Math.min(1, (vdWant - s.car.vd) * 0.6)), nitro: false };
+        g.advance(1 / 60);
+        g['present'](1 / 60);
+      }
+      c.input.override = null;
+      return { status: s.status, hit: s.car.hitObstacle === o.id };
+    });
+    assert.equal(r.status, 'over');
+    assert.ok(r.hit);
+    await page.waitForFunction(() => window.__curva.screen() === 'over');
+    assert.equal(await page.textContent('#over-kicker'), 'Pinchos del helicóptero');
+    await page.close();
+  });
+
   it('sin errores de consola en todas las pruebas', () => {
     assert.deepEqual(errors, []);
   });

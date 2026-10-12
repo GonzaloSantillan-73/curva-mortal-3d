@@ -6,7 +6,7 @@ import '@fontsource/barlow/600.css';
 import './style.css';
 import { Game, type HudState, type RunResult } from './Game.ts';
 import { InputManager } from './InputManager.ts';
-import { StorageManager, type PadSize, type Quality } from './StorageManager.ts';
+import { StorageManager, type PadSize, type Quality, type SteerMode } from './StorageManager.ts';
 import { autopilot } from './core/autopilot.ts';
 import { validateTrack } from './core/validate.ts';
 import { emptyPoint } from './core/track.ts';
@@ -55,6 +55,8 @@ function startRun() {
   show('hud');
   runs++;
   game.sfx.unlock();
+  // iOS sólo da permiso de inclinación desde un gesto: "Arrancar" lo es
+  if (input.mode === 'tilt' && !tiltReady) void applySteer('tilt');
   game.start(params.has('seed') ? Number(params.get('seed')) : undefined);
   if (runs === 1) tip('El auto no dobla solo: girá vos en las curvas', 3400);
   else if (runs === 2) tip('Pinchos: subí a la rampa de un carril', 3400);
@@ -132,11 +134,16 @@ game.onHud = (h: HudState) => {
   }
 };
 
+game.onHeli = (what) => {
+  if (what === 'enter') tip('¡Helicóptero! Cuando avise, esquivá los pinchos', 3400);
+};
+
 const TITLES: Record<string, [string, string]> = {
   side: ['Fuera de la calzada', 'Te fuiste a la banquina'],
   gap: ['Salto corto', 'No llegaste al otro lado'],
   crash: ['Choque', 'Te comiste el bloque'],
   spikes: ['Pinchos', 'Había que subir a la rampa'],
+  caltrops: ['Pinchos del helicóptero', 'Te reventaron las gomas'],
   ramp: ['Choque', 'Le pegaste al costado de la rampa'],
 };
 
@@ -145,7 +152,7 @@ game.onOver = (r: RunResult) => {
   const dist = Math.floor(r.distance);
   const record = dist > best;
   if (record) StorageManager.setHighScore(dist);
-  const key = r.reason === 'crash' && (r.hit === 'spikes' || r.hit === 'ramp') ? r.hit : r.reason ?? 'side';
+  const key = r.reason === 'crash' && (r.hit === 'spikes' || r.hit === 'ramp' || r.hit === 'caltrops') ? r.hit : r.reason ?? 'side';
   const [kicker, title] = TITLES[key] ?? TITLES.side;
   $('over-kicker').textContent = kicker;
   $('over-title').textContent = title;
@@ -178,6 +185,45 @@ function applyPadSize(p: PadSize) {
   document.querySelector<HTMLElement>('.pads')?.style.setProperty('--pad-size', PAD_PX[p] + 'px');
   document.getElementById('hud')?.style.setProperty('--pad-size', PAD_PX[p] + 'px');
 }
+// dirección en el celular: botones en pantalla o inclinación; se recuerda
+const elSteerNote = $('steer-note');
+const STEER_NOTE = elSteerNote.textContent ?? '';
+let tiltReady = false;
+let tiltCheck = 0;
+async function applySteer(m: SteerMode) {
+  window.clearInterval(tiltCheck);
+  $('hud').classList.remove('steer-tilt');
+  elSteerNote.textContent = STEER_NOTE;
+  tiltReady = await input.setMode(m);
+  if (m !== 'tilt') return;
+  if (!tiltReady) {
+    elSteerNote.textContent = 'Sin permiso para leer la inclinación: se usan los botones. Se vuelve a pedir al arrancar.';
+    return;
+  }
+  // las flechas se esconden recién cuando llegan datos del sensor; si no llegan, quedan
+  let tries = 0;
+  tiltCheck = window.setInterval(() => {
+    if (input.tiltEvents > 0) {
+      window.clearInterval(tiltCheck);
+      $('hud').classList.add('steer-tilt');
+    } else if (++tries > 8) {
+      window.clearInterval(tiltCheck);
+      elSteerNote.textContent = 'Este dispositivo no informa la inclinación: se usan los botones.';
+    }
+  }, 250);
+}
+const startSteer = StorageManager.getSteerMode();
+input.mode = startSteer;
+void applySteer(startSteer);
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name=steer]')) {
+  r.checked = r.value === startSteer;
+  r.addEventListener('change', () => {
+    const m = r.value as SteerMode;
+    StorageManager.setSteerMode(m);
+    void applySteer(m);
+  });
+}
+
 const startPad = StorageManager.getPadSize();
 applyPadSize(startPad);
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name=padsize]')) {

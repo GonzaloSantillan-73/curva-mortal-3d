@@ -3,6 +3,7 @@ import {
   NITRO_MIN_START, NITRO_MULT, NITRO_RECHARGE, START_S, baseSpeedAt, requiredAhead,
 } from './config.ts';
 import { Generator } from './generator.ts';
+import { Helicopter } from './heli.ts';
 import {
   computePose, createCar, emptyPose, placeCar, stepCar,
   type CarInput, type CarPose, type CarState, type EndReason,
@@ -18,6 +19,7 @@ export type SimEvent =
   | { type: 'land'; impact: number }
   | { type: 'crash' }
   | { type: 'nitro'; on: boolean }
+  | { type: 'heli'; what: 'enter' | 'warn' | 'drop' }
   | { type: 'fall'; reason: EndReason }
   | { type: 'over'; reason: EndReason };
 
@@ -27,6 +29,7 @@ export class Simulation {
   readonly track = new Track();
   readonly gen = new Generator(this.track, 1);
   readonly car: CarState = createCar();
+  readonly heli = new Helicopter();
   readonly pose: CarPose = emptyPose();
   readonly prevPose: CarPose = emptyPose();
   status: SimStatus = 'countdown';
@@ -58,6 +61,7 @@ export class Simulation {
     this.gen.reset(seed);
     while (this.track.endS < requiredAhead(START_S) + START_S) this.gen.generateNext();
     placeCar(this.car, this.track, START_S);
+    this.heli.reset(seed);
     this.status = 'countdown';
     this.countdown = COUNTDOWN;
     this.time = 0;
@@ -151,6 +155,8 @@ export class Simulation {
 
     this.collectCoins();
     this.maintainTrack();
+    const heli = this.heli.step(dt, this.track, car, this.time, this.status === 'running');
+    if (heli) this.events.push({ type: 'heli', what: heli });
 
     if (this.status === 'running') this.minAhead = Math.min(this.minAhead, this.ahead);
 

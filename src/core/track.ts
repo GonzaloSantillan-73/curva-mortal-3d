@@ -23,7 +23,7 @@ export interface SegmentSpec {
   profile: Profile;
 }
 
-export type ObstacleKind = 'block' | 'tires' | 'mover' | 'spikes';
+export type ObstacleKind = 'block' | 'tires' | 'mover' | 'spikes' | 'caltrops';
 
 export interface Obstacle {
   id: number;
@@ -169,10 +169,14 @@ export function segmentEnd(seg: Segment): EndState {
 
 export class Track {
   segments: Segment[] = [];
+  // Pinchos arrojados desde el helicóptero: no pertenecen a ningún tramo, pero la física,
+  // el piloto automático y la vista los ven igual que al resto (vía obstaclesNear).
+  dropped: Obstacle[] = [];
   readonly halfWidth = TRACK_HALF_WIDTH;
 
   clear() {
     this.segments = [];
+    this.dropped = [];
   }
 
   get startS(): number {
@@ -281,6 +285,7 @@ export class Track {
         if (o.s1 >= s0 && o.s0 <= s1) out.push(o);
       }
     }
+    for (const o of this.dropped) if (o.s1 >= s0 && o.s0 <= s1) out.push(o);
     return out;
   }
 }

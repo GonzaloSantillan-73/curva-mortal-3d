@@ -111,7 +111,7 @@ export function minObstacleGap(v: number): number {
 
 // Pendiente lateral (metros laterales por metro de avance) que permite la dirección
 // real a velocidad base. Derivada del cambio de carril con giro + contragiro al máximo.
-function lateralSlope(v: number, kappa: number): number {
+export function lateralSlope(v: number, kappa: number): number {
   // basada en un desplazamiento corto (2 m): el tiempo de girar el volante no se achica
   // con un 35 % de margen sobre el giro perfecto: tiene que ser posible para una persona
   return 2 / (laneChangeDistance(v, 2, kappa) * 1.35);

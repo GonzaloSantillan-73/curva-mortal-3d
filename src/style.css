@@ -393,6 +393,12 @@ kbd {
   gap: calc(var(--pad-size) * 0.14);
 }
 
+/* dirección por inclinación: sin flechas (salto y nitro quedan en su lugar) */
+.steer-tilt .pad[data-pad=left],
+.steer-tilt .pad[data-pad=right] {
+  visibility: hidden;
+}
+
 .pad {
   width: var(--pad-size);
   height: var(--pad-size);

@@ -64,6 +64,23 @@ function intersectAll(a: Gap[], b: Gap[]): Gap[] {
   return out;
 }
 
+function closestPart(free: Gap[], goal: Gap[]): Gap[] {
+  let best: Gap[] = free;
+  let dist = Infinity;
+  for (const r of free) {
+    for (const g of goal) {
+      if (r.b <= g.a && g.a - r.b < dist) {
+        dist = g.a - r.b;
+        best = [{ a: Math.max(r.a, r.b - 0.3), b: r.b }];
+      } else if (r.a >= g.b && r.a - g.b < dist) {
+        dist = r.a - g.b;
+        best = [{ a: r.a, b: Math.min(r.b, r.a + 0.3) }];
+      }
+    }
+  }
+  return best;
+}
+
 function freeGaps(row: Obstacle[], hw: number): Gap[] {
   let free = [{ a: -hw + 0.6, b: hw - 0.6 }];
   for (const o of row) {
@@ -112,7 +129,8 @@ export function autopilot(sim: Simulation, opts: AutopilotOptions = {}): CarInpu
       const reach = Math.max(0, lateralReach(car.v, groups[k + 1].s - groups[k].s - 3, kNow) - 0.2);
       const grown = feasible.map((r) => ({ a: r.a - reach, b: r.b + reach }));
       const next = intersectAll(groups[k].free, grown);
-      feasible = next.length ? next : groups[k].free;
+      // sin plan perfecto: el borde del hueco más cercano a lo que sigue (no olvidar el futuro)
+      feasible = next.length ? next : closestPart(groups[k].free, grown);
     }
     // hacia adelante: sólo sirve lo que se alcanza antes de la fila inmediata;
     // si el plan ideal ya no es alcanzable, primero se sobrevive a esa fila
