@@ -2,15 +2,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CALTROP_DEPTH, CALTROP_HEIGHT, CALTROP_WIDTH, LANES, LANE_WIDTH } from '../core/config.ts';
 import type { CaltropDrop, Helicopter } from '../core/heli.ts';
+import type { MissileHeli } from '../core/missile.ts';
 import { Track, emptyPoint } from '../core/track.ts';
 
-// Helicóptero + pinchos arrojados. La posición se toma SIEMPRE de la pista: (s, d) de la
+// Helicóptero (de pinchos o de misiles) + pinchos arrojados. La posición se toma SIEMPRE de la pista: (s, d) de la
 // simulación → punto de la calzada → + altura. Así acompaña cada curva igual que la ruta.
 // Origen del modelo: centro del fuselaje; -z es el frente (como el auto). Se dibuja a escala
 // SCALE (un poco más grande que uno real) para que se lea bien a 100-150 m.
 const SCALE = 1.5;
 
-const ALERT_SIDE = 8.5;   // metros al costado del helicóptero (en el plano de la cámara)
+// 'caltrops': oscuro, dos tipos en las puertas con la tira de pinchos.
+// 'missiles': verde militar, alas cortas con lanzacohetes; vuela mirando al vehículo.
+export type HeliStyle = 'caltrops' | 'missiles';
 
 export class HeliView {
   readonly root = new THREE.Group();
@@ -20,7 +23,6 @@ export class HeliView {
   private tailRotor = new THREE.Group();
   private rotorDisc: THREE.Mesh;
   private crew: THREE.Object3D[] = [];
-  private alert: THREE.Sprite;
   private shadow: THREE.Mesh;
   private target: THREE.Mesh;
   private targetMat: THREE.MeshBasicMaterial;
@@ -34,13 +36,14 @@ export class HeliView {
   private track: Track;
   private probe = emptyPoint();
   private w = { x: 0, y: 0, z: 0 };
-  private tmp = new THREE.Vector3();
-  private right = new THREE.Vector3();
+  private style: HeliStyle;
 
-  constructor(track: Track, shadows: boolean) {
+  constructor(track: Track, shadows: boolean, style: HeliStyle = 'caltrops') {
     this.track = track;
-    const body = new THREE.MeshStandardMaterial({ color: 0x2b3440, roughness: 0.45, metalness: 0.3 });
-    const accent = new THREE.MeshStandardMaterial({ color: 0xe0a92b, roughness: 0.5 });
+    this.style = style;
+    const missiles = style === 'missiles';
+    const body = new THREE.MeshStandardMaterial({ color: missiles ? 0x4a5532 : 0x2b3440, roughness: 0.5, metalness: 0.25 });
+    const accent = new THREE.MeshStandardMaterial({ color: missiles ? 0xb3261e : 0xe0a92b, roughness: 0.5 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x7fa6bf, roughness: 0.1, metalness: 0.6, emissive: 0x0c1a24 });
     const metal = new THREE.MeshStandardMaterial({ color: 0x8d8a85, roughness: 0.4, metalness: 0.7 });
     const black = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.7 });
@@ -101,12 +104,30 @@ export class HeliView {
       b.rotation.x = (k * Math.PI) / 2;
     }
 
+    if (missiles) {
+      // alas cortas con dos lanzacohetes por lado (con las puntas rojas a la vista)
+      const pod = new THREE.CylinderGeometry(0.22, 0.22, 1.6, 10);
+      pod.rotateX(Math.PI / 2);
+      const tip = new THREE.ConeGeometry(0.22, 0.4, 10);
+      tip.rotateX(-Math.PI / 2);
+      for (const sx of [-1, 1]) {
+        add(new THREE.BoxGeometry(1.5, 0.12, 0.7), body, sx * 1.75, -0.35, 0.2);
+        for (const k of [0, 1]) {
+          const x = sx * (1.55 + k * 0.6);
+          add(pod, metal, x, -0.62, 0.15);
+          add(tip, accent, x, -0.62, -0.85);
+        }
+      }
+      // sin puertas abiertas: el fuselaje va cerrado
+      for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.1, 1.15, 1.7), body, sx * 1.2, 0.05, 0.35);
+    }
+
     // los dos tipos sentados en las puertas, piernas afuera, listos para tirar los pinchos
     const suit = new THREE.MeshStandardMaterial({ color: 0x3b4a36, roughness: 0.85 });
     const skin = new THREE.MeshStandardMaterial({ color: 0xc89a74, roughness: 0.8 });
     const helmet = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.4 });
     const strip = new THREE.MeshStandardMaterial({ color: 0x1d2440, roughness: 0.6 });
-    for (const sx of [-1, 1]) {
+    for (const sx of missiles ? [] : [-1, 1]) {
       const man = new THREE.Group();
       man.position.set(sx * 1.25, -0.25, 0.4);
       add(new THREE.BoxGeometry(0.42, 0.62, 0.32), suit, 0, 0.32, 0, man);
@@ -129,13 +150,6 @@ export class HeliView {
     this.model.scale.setScalar(SCALE);
     this.heli.add(this.model);
     this.root.add(this.heli);
-
-    // ícono de alerta: tamaño fijo en pantalla, siempre visible por encima de todo
-    this.alert = new THREE.Sprite(new THREE.SpriteMaterial({ map: alertTexture(), depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false }));
-    this.alert.scale.set(0.085, 0.085, 1);
-    this.alert.renderOrder = 10;
-    this.alert.visible = false;
-    this.root.add(this.alert);
 
     // sombra difusa en la calzada (ayuda a leer la altura) y marca del carril amenazado
     this.shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: blobTexture(), transparent: true, depthWrite: false, opacity: 0.5 }));
@@ -166,17 +180,16 @@ export class HeliView {
     this.drops.clear();
     this.heli.visible = false;
     this.shadow.visible = false;
-    this.alert.visible = false;
     this.target.visible = false;
   }
 
-  update(h: Helicopter, alpha: number, time: number, carV: number, camera: THREE.Camera) {
-    this.syncDrops(h, time);
+  update(h: Helicopter | MissileHeli, alpha: number, time: number, carV: number) {
+    const caltrops = this.style === 'caltrops' ? (h as Helicopter) : null;
+    if (caltrops) this.syncDrops(caltrops, time);
     const on = h.active;
     this.heli.visible = on;
     this.shadow.visible = on;
     if (!on) {
-      this.alert.visible = false;
       this.target.visible = false;
       return;
     }
@@ -193,29 +206,23 @@ export class HeliView {
     const theta = this.probe.theta;
     this.heli.position.set(this.w.x, this.w.y + alt + 1.6 * SCALE, this.w.z);
     // rumbo = el de la ruta; se inclina al desplazarse de costado y baja la nariz al acelerar
-    const pitch = -Math.max(-0.12, Math.min(0.22, (h.vs - carV * 0.6) * 0.006));
-    const roll = Math.max(-0.35, Math.min(0.35, -h.vd * 0.09));
-    this.heli.rotation.set(pitch, theta, roll, 'YXZ');
+    // el de misiles vuela de espaldas a la ruta, mirando al vehículo
+    const back = this.style === 'missiles';
+    const pitch = -Math.max(-0.12, Math.min(0.22, (h.vs - carV * 0.6) * 0.006)) * (back ? -1 : 1);
+    const roll = Math.max(-0.35, Math.min(0.35, -h.vd * 0.09)) * (back ? -1 : 1);
+    this.heli.rotation.set(pitch, theta + (back ? Math.PI : 0), roll, 'YXZ');
     this.rotor.rotation.y = time * 38;
     this.tailRotor.rotation.x = time * 55;
-    for (const [k, man] of this.crew.entries()) man.rotation.x = h.warning ? Math.sin(time * 7 + k) * 0.08 : 0;
+    for (const [k, man] of this.crew.entries()) man.rotation.x = h.attacking ? Math.sin(time * 7 + k) * 0.08 : 0;
 
     this.shadow.position.set(this.w.x, this.w.y + 0.04, this.w.z);
     this.shadow.rotation.y = theta;
     (this.shadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.12, 0.55 - alt * 0.012);
 
-    // alerta: parpadea mientras se ubica sobre el carril y hasta soltar
-    this.alert.visible = h.warning && Math.sin(time * 14) > -0.35;
-    if (h.warning) {
-      this.right.setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize();
-      // del lado de la pantalla con más lugar, para que nunca se salga de cuadro
-      const side = this.tmp.copy(this.heli.position).project(camera).x > 0 ? -1 : 1;
-      this.tmp.copy(this.heli.position).addScaledVector(this.right, side * ALERT_SIDE);
-      this.tmp.y += 1.2;
-      this.alert.position.copy(this.tmp);
-      // marca en el carril donde van a caer
-      if (t.worldAt(h.goal, LANES[h.lane], this.w)) {
-        t.sample(h.goal, this.probe);
+    // zona roja en el carril donde van a caer los pinchos (es el único aviso)
+    if (caltrops?.attacking) {
+      if (t.worldAt(caltrops.goal, LANES[caltrops.lane], this.w)) {
+        t.sample(caltrops.goal, this.probe);
         this.target.visible = true;
         this.target.position.set(this.w.x, this.w.y + 0.05, this.w.z);
         this.target.rotation.y = this.probe.theta;
@@ -347,31 +354,6 @@ function makeCaltropStrip(): THREE.BufferGeometry {
   a.dispose();
   b.dispose();
   return merged;
-}
-
-function alertTexture(): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d')!;
-  g.lineJoin = 'round';
-  g.beginPath();
-  g.moveTo(64, 10);
-  g.lineTo(122, 114);
-  g.lineTo(6, 114);
-  g.closePath();
-  g.fillStyle = '#e8b230';
-  g.strokeStyle = '#c0281c';
-  g.lineWidth = 12;
-  g.stroke();
-  g.fill();
-  g.fillStyle = '#1d1b18';
-  g.fillRect(57, 42, 14, 40);
-  g.beginPath();
-  g.arc(64, 96, 8, 0, Math.PI * 2);
-  g.fill();
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
 }
 
 function blobTexture(rgb = '0,0,0'): THREE.CanvasTexture {

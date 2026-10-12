@@ -127,6 +127,11 @@ export class Sfx {
     }
   }
 
+  // Impacto de misil: estallido grave.
+  boom() {
+    this.burst(700, 0.9, 0.9);
+  }
+
   // Los pinchos caen: soplido corto.
   drop() {
     this.burst(900, 0.35, 0.3);

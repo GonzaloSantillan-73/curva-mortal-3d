@@ -1,5 +1,5 @@
 import {
-  ACCEL, AIR_CONTROL, CAR_LENGTH, CAR_WIDTH, DECEL, GRAVITY, JUMP_SPEED, LAND_TOLERANCE,
+  ACCEL, AIR_CONTROL, BRAKE_DECEL, CAR_LENGTH, CAR_WIDTH, DECEL, GRAVITY, JUMP_SPEED, LAND_TOLERANCE,
   LANE_RAMP_VY_MAX, LANE_RAMP_VY_MIN, NITRO_ACCEL, RAMP_MOUNT_LIFT, SLAB_THICKNESS,
   STEER_IN, STEER_OUT, WHEELBASE, yawMax,
 } from './config.ts';
@@ -30,6 +30,7 @@ export interface CarInput {
   steer: number;   // -1 izquierda … 1 derecha
   nitro: boolean;  // el nitro está empujando (lo decide la simulación)
   jump: boolean;   // flanco: se consume en el paso
+  brake?: boolean; // frenando: baja hacia la velocidad mínima de a poco
 }
 
 export interface CarState {
@@ -239,7 +240,7 @@ export function stepCar(car: CarState, track: Track, input: CarInput, dt: number
   car.steer = approach(car.steer, target, (returning ? STEER_OUT : STEER_IN) * dt);
 
   if (grounded) {
-    const rate = targetSpeed > car.v ? (input.nitro ? NITRO_ACCEL : ACCEL) : DECEL;
+    const rate = targetSpeed > car.v ? (input.nitro ? NITRO_ACCEL : ACCEL) : input.brake ? BRAKE_DECEL : DECEL;
     car.v = approach(car.v, targetSpeed, rate * dt);
   }
   car.yawRate = car.steer * yawMax(car.v) * (grounded ? 1 : AIR_CONTROL);

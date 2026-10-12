@@ -33,7 +33,66 @@
             <li><kbd>←</kbd><kbd>→</kbd> volante</li>
             <li><kbd>Espacio</kbd> salto</li>
             <li><kbd>Shift</kbd> nitro ×3 (mantener)</li>
+            <li><kbd>↓</kbd> frenar (mantener)</li>
           </ul>
+        </div>
+      </section>
+
+      <!-- Elección del vehículo -->
+      <section id="garage" class="screen" aria-label="Elegir vehículo">
+        <div class="sheet garage">
+          <p class="kicker">Garage <span>·</span> elegí con qué correr</p>
+          <div class="vcards" role="radiogroup" aria-label="Vehículo">
+            <label class="vcard">
+              <input type="radio" name="vehicle" value="car" />
+              <span class="vcard-box">
+                <svg viewBox="0 0 120 64" aria-hidden="true">
+                  <path d="M10 44 V34 L22 30 L38 18 H74 L90 30 L108 33 V44 Z" fill="#c23b2b" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
+                  <path d="M42 22 H72 L84 30 H34 Z" fill="#24303a"/>
+                  <path d="M10 37 H108" stroke="#f0e9dc" stroke-width="3"/>
+                  <circle cx="32" cy="46" r="10" fill="#1d1b18"/><circle cx="32" cy="46" r="4" fill="#c9c6c0"/>
+                  <circle cx="88" cy="46" r="10" fill="#1d1b18"/><circle cx="88" cy="46" r="4" fill="#c9c6c0"/>
+                </svg>
+                <b>Auto</b>
+                <small>Cuatro ruedas, el de siempre</small>
+              </span>
+            </label>
+            <label class="vcard">
+              <input type="radio" name="vehicle" value="moto" />
+              <span class="vcard-box">
+                <svg viewBox="0 0 120 64" aria-hidden="true">
+                  <circle cx="26" cy="46" r="12" fill="none" stroke="#1d1b18" stroke-width="6"/>
+                  <circle cx="94" cy="46" r="12" fill="none" stroke="#1d1b18" stroke-width="6"/>
+                  <path d="M26 46 L46 30 H72 L94 46" fill="none" stroke="#57514a" stroke-width="4"/>
+                  <path d="M44 34 L52 24 H74 L80 32 L62 38 Z" fill="#c23b2b" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
+                  <path d="M80 32 L86 16 H92" fill="none" stroke="#1d1b18" stroke-width="4" stroke-linecap="round"/>
+                  <path d="M50 24 L58 8 L70 12 L66 24" fill="#23272e"/>
+                  <circle cx="64" cy="7" r="6" fill="#f0e9dc" stroke="#1d1b18" stroke-width="2"/>
+                </svg>
+                <b>Moto</b>
+                <small>Liviana, se inclina en las curvas</small>
+              </span>
+            </label>
+            <label class="vcard">
+              <input type="radio" name="vehicle" value="bike" />
+              <span class="vcard-box">
+                <svg viewBox="0 0 120 64" aria-hidden="true">
+                  <circle cx="28" cy="46" r="13" fill="none" stroke="#1d1b18" stroke-width="3"/>
+                  <circle cx="92" cy="46" r="13" fill="none" stroke="#1d1b18" stroke-width="3"/>
+                  <path d="M28 46 L52 46 L44 26 Z M52 46 L82 26 L44 26 M82 26 L92 46 M80 20 H90" fill="none" stroke="#2f7fb8" stroke-width="4" stroke-linejoin="round"/>
+                  <path d="M40 22 H50" stroke="#1d1b18" stroke-width="4" stroke-linecap="round"/>
+                  <path d="M46 20 L60 4 L80 18" fill="none" stroke="#e0a92b" stroke-width="6" stroke-linecap="round"/>
+                  <circle cx="62" cy="4" r="5" fill="#c23b2b"/>
+                </svg>
+                <b>Bici</b>
+                <small>A pedal… y con nitro</small>
+              </span>
+            </label>
+          </div>
+          <div class="actions">
+            <button id="btn-go" class="btn btn-go">Arrancar <span class="arrow" aria-hidden="true"></span></button>
+            <button id="btn-garage-back" class="btn-link">Volver</button>
+          </div>
         </div>
       </section>
 
@@ -57,7 +116,8 @@
             <button class="pad" data-pad="left" aria-label="Izquierda"><svg viewBox="0 0 24 24"><path d="M15 4 L7 12 L15 20" /></svg></button>
             <button class="pad" data-pad="right" aria-label="Derecha"><svg viewBox="0 0 24 24"><path d="M9 4 L17 12 L9 20" /></svg></button>
           </div>
-          <div class="pad-group">
+          <div class="pad-group pad-group-actions">
+            <button class="pad pad-round pad-brake" data-pad="brake" id="pad-brake" aria-label="Frenar">Freno</button>
             <button class="pad pad-round" data-pad="jump">Salto</button>
             <button class="pad pad-round pad-nitro" data-pad="nitro" id="pad-nitro"><span>Nitro</span></button>
           </div>
@@ -120,11 +180,23 @@
             <label><input type="radio" name="padsize" value="l" /><span>Grande</span></label>
             <label><input type="radio" name="padsize" value="xl" /><span>Enorme</span></label>
           </fieldset>
+          <button id="btn-layout" class="btn btn-wide">Ubicar los controles</button>
           <label class="check"><input type="checkbox" id="chk-debug" /> <span>Vista de depuración <small>(F2)</small></span></label>
           <p class="note">Cambiar la calidad recarga el juego.</p>
           <div class="actions">
             <button id="btn-close-settings" class="btn btn-go">Listo</button>
           </div>
+        </div>
+      </section>
+      <!-- Editor de la ubicación de los controles -->
+      <section id="layout" class="screen" aria-label="Ubicar los controles">
+        <div class="layout-bar">
+          <p>Arrastrá cada botón con el dedo hasta donde te quede cómodo.</p>
+          <div class="actions">
+            <button id="btn-layout-done" class="btn btn-go">Listo</button>
+            <button id="btn-layout-reset" class="btn-link">Restablecer</button>
+          </div>
+          <small id="layout-orient"></small>
         </div>
       </section>
     </div>

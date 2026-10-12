@@ -23,7 +23,7 @@ export interface SegmentSpec {
   profile: Profile;
 }
 
-export type ObstacleKind = 'block' | 'tires' | 'mover' | 'spikes' | 'caltrops';
+export type ObstacleKind = 'block' | 'tires' | 'mover' | 'spikes' | 'caltrops' | 'missile';
 
 export interface Obstacle {
   id: number;

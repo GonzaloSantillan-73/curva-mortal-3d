@@ -100,20 +100,38 @@ export function requiredAhead(s: number): number {
 // --- Helicóptero que arroja pinchos ---
 // Aparece a los HELI_START metros, baja del cielo y vuela por encima de la ruta (en
 // coordenadas de pista: sigue cada curva). Antes de soltar se ubica sobre un carril y avisa.
-export const HELI_START = 1000;        // metros recorridos
+export const HELI_START = 500;         // metros recorridos (helicóptero de pinchos)
 export const HELI_ALT = 8;             // altura de crucero sobre la calzada
 export const HELI_ENTER_ALT = 75;      // desde dónde baja
 export const HELI_ENTER_TIME = 3.2;
-export const HELI_LEAD_TIME = 4.2;     // va adelante del auto: ~4 s de recorrido…
-export const HELI_LEAD_MIN = 110;      // …nunca menos de 110 m
-export const HELI_LEAD_MAX = 240;
-export const HELI_AIM_TIME = 1.0;      // alerta mínima: tiempo para ubicarse sobre el carril…
-export const HELI_WARN_TIME = 1.2;     // …más este tiempo ya suspendido encima, antes de soltar
-export const HELI_BRAKE = 30;          // m/s² al frenar para quedar suspendido sobre el punto
+export const HELI_LEAD_TIME = 2.6;     // va adelante del vehículo: ~2,6 s de recorrido…
+export const HELI_LEAD_MIN = 75;       // …nunca menos de 75 m
+export const HELI_LEAD_MAX = 200;
 export const HELI_COOLDOWN_MIN = 2.5;
 export const HELI_COOLDOWN_MAX = 5;
 export const CALTROP_GRAVITY = 30;
 export const CALTROP_WIDTH = LANE_WIDTH - 0.3;  // ocupa un solo carril
 export const CALTROP_DEPTH = 1.4;
 export const CALTROP_HEIGHT = 0.45;    // se pueden saltar con el botón
+export const ATTACK_GAP = 2.0;         // segundos entre el fin de un ataque y el comienzo de otro
+
+// --- Helicóptero con misiles ---
+// Marca en el suelo la zona exacta del impacto, recién después dispara; el misil avanza
+// según lo que avanza el vehículo y explota justo cuando éste llega a la zona.
+export const MISSILE_START = 1000;
+export const MISSILE_ALT = 15;          // más alto que el de los pinchos: nunca se cruzan
+export const MISSILE_LEAD_TIME = 4.0;   // más adelante que el de los pinchos: no se superponen
+export const MISSILE_LEAD_MIN = 125;
+export const MISSILE_MARK_TIME = 1.0;   // la zona roja se ve al menos esto antes del disparo
+export const MISSILE_MIN_FLIGHT = 0.8;  // segundos de vuelo mínimos (para que se vea venir)
+export const MISSILE_ZONE_DEPTH = 4;
+export const MISSILE_ZONE_WIDTH = LANE_WIDTH - 0.3;  // un solo carril
+export const MISSILE_HEIGHT = 3;        // la explosión no se salta
+export const MISSILE_COOLDOWN_MIN = 3;
+export const MISSILE_COOLDOWN_MAX = 6;
+
+// --- Freno ---
+export const BRAKE_MIN_SPEED = 30 / 3.6;  // nunca menos de 30 km/h
+export const BRAKE_DECEL = 12;            // m/s²: baja de a poco
+export const BRAKE_CLEAR = 80;            // sin efecto a menos de esto de un salto o rampa
 export const CALTROP_REACTION = 0.6;   // segundos de reacción humana que se descuentan al validar

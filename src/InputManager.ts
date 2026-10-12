@@ -1,7 +1,7 @@
 // Teclado y controles táctiles. Un solo juego de listeners para toda la vida de la página;
 // reset() limpia todo el estado al pausar o reiniciar, para que no quede una tecla "pegada".
 
-type Action = 'left' | 'right' | 'nitro';
+type Action = 'left' | 'right' | 'nitro' | 'brake';
 export type SteerMode = 'buttons' | 'tilt';
 
 const DEG = Math.PI / 180;
@@ -12,6 +12,7 @@ const KEYS: Record<string, Action> = {
   ArrowLeft: 'left', KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right',
   ShiftLeft: 'nitro', ShiftRight: 'nitro', ArrowUp: 'nitro', KeyW: 'nitro',
+  ArrowDown: 'brake', KeyS: 'brake',
 };
 
 export class InputManager {
@@ -24,7 +25,7 @@ export class InputManager {
   private tilt = 0;
   tiltEvents = 0;
   // permite a los tests inyectar entradas sin tocar el DOM
-  override: { steer: number; nitro: boolean } | null = null;
+  override: { steer: number; nitro: boolean; brake?: boolean } | null = null;
 
   constructor() {
     window.addEventListener('keydown', (e) => {
@@ -50,6 +51,8 @@ export class InputManager {
       const action = el.dataset.pad as Action | 'jump';
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        // acomodando los controles: arrastrar un botón no es apretarlo
+        if (document.body.classList.contains('editing-pads')) return;
         el.setPointerCapture(e.pointerId);
         el.classList.add('is-down');
         if (action === 'jump') this.jumpPressed = true;
@@ -109,6 +112,11 @@ export class InputManager {
   get nitro(): boolean {
     if (this.override) return this.override.nitro;
     return this.held('nitro');
+  }
+
+  get brake(): boolean {
+    if (this.override) return !!this.override.brake;
+    return this.held('brake');
   }
 
   pressJump() {

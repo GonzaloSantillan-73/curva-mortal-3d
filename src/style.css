@@ -713,3 +713,200 @@ kbd {
 @media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
   .tip { top: calc(18px + env(safe-area-inset-top, 0px)); bottom: auto; }
 }
+
+/* ---------- garage: elección del vehículo ---------- */
+
+#garage {
+  pointer-events: auto;
+  background: linear-gradient(to top, rgba(241, 231, 211, 0.96) 0, rgba(241, 231, 211, 0.96) 46%, rgba(241, 231, 211, 0) 72%);
+}
+
+.garage {
+  width: min(560px, calc(100% - 56px));
+}
+
+.vcards {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0 22px;
+}
+
+.vcard {
+  flex: 1 1 0;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.vcard input {
+  position: absolute;
+  opacity: 0;
+}
+
+.vcard-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  height: 100%;
+  padding: 10px 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  transition: transform 100ms, box-shadow 100ms;
+}
+
+.vcard svg {
+  width: 100%;
+  height: auto;
+  margin-bottom: 4px;
+}
+
+.vcard b {
+  font: 800 24px/1 var(--display);
+  text-transform: uppercase;
+}
+
+.vcard small {
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--ink-2);
+}
+
+.vcard input:checked + .vcard-box {
+  border-color: var(--signal);
+  box-shadow: 5px 5px 0 var(--ink);
+  transform: translate(-2px, -2px);
+}
+
+.vcard input:checked + .vcard-box b {
+  color: var(--signal);
+}
+
+.vcard input:focus-visible + .vcard-box {
+  outline: 3px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .garage { width: calc(100% - 32px); left: 16px; }
+  .vcards { gap: 7px; }
+  .vcard-box { padding: 8px 6px 10px; }
+  .vcard b { font-size: 20px; }
+  .vcard small { font-size: 11.5px; }
+}
+
+/* ---------- freno ---------- */
+
+/* acciones: freno arriba, salto y nitro abajo (no se ensancha la fila en vertical) */
+.pad-group-actions {
+  display: grid;
+  grid-template-columns: repeat(2, var(--pad-size));
+  grid-template-areas: "brake ." "jump nitro";
+  gap: calc(var(--pad-size) * 0.14);
+}
+
+.pad-brake { grid-area: brake; border-color: #e0674a; }
+.pad-group-actions [data-pad=jump] { grid-area: jump; }
+.pad-group-actions .pad-nitro { grid-area: nitro; }
+
+.pad-brake.is-active {
+  background: rgba(176, 52, 30, 0.75);
+  box-shadow: 0 0 12px rgba(224, 103, 74, 0.7);
+}
+
+/* pulsado cerca de un salto o rampa: ahí no frena */
+.pad-brake.is-blocked {
+  border-style: dashed;
+  color: rgba(241, 231, 211, 0.55);
+}
+
+@media (pointer: coarse) {
+  .tip { bottom: calc(var(--pad-lift, 78px) + var(--pad-size, 72px) * 2.14 + 24px + var(--safe-b)); }
+}
+
+/* ---------- controles en la ubicación elegida por el jugador ---------- */
+
+.pads.is-custom {
+  inset: 0;
+}
+
+.pads.is-custom .pad-group {
+  display: contents;
+}
+
+.pads.is-custom .pad {
+  position: absolute;
+}
+
+/* editando: se ven todos los botones (también en computadora y con Inclinar) */
+body.editing-pads .pads {
+  display: flex;
+}
+
+body.editing-pads .pad {
+  visibility: visible !important;
+  outline: 2px dashed var(--yellow);
+  outline-offset: 3px;
+  cursor: grab;
+}
+
+body.editing-pads .pad.is-dragging {
+  outline-style: solid;
+  cursor: grabbing;
+  background: rgba(29, 27, 24, 0.75);
+}
+
+#layout {
+  pointer-events: none;
+  background: rgba(29, 27, 24, 0.18);
+}
+
+.layout-bar {
+  position: absolute;
+  left: 50%;
+  top: calc(128px + var(--safe-t));
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 32px));
+  padding: 12px 14px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 4px;
+  box-shadow: 5px 5px 0 var(--ink);
+  pointer-events: auto;
+}
+
+.layout-bar p {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.layout-bar .actions {
+  gap: 16px;
+}
+
+.layout-bar .btn {
+  min-height: 44px;
+}
+
+.layout-bar small {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-2);
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .layout-bar { top: calc(14px + var(--safe-t)); width: min(360px, calc(100% - 360px)); }
+  .layout-bar p { font-size: 13px; margin-bottom: 6px; }
+}
+
+.btn-wide {
+  width: 100%;
+  margin: 0 0 14px;
+  justify-content: center;
+  min-height: 46px;
+  font-size: 18px;
+}
+
+/* en horizontal el aviso va arriba (anula el "bottom" de los controles en vertical) */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  .tip { top: calc(18px + env(safe-area-inset-top, 0px)); bottom: auto; }
+}

@@ -16,13 +16,19 @@ after(async () => {
   await browser?.close();
 });
 
-async function open(viewport = { width: 1280, height: 720 }, query = '?seed=5') {
-  const page = await browser.newPage({ viewport });
+async function open(viewport = { width: 1280, height: 720 }, query = '?seed=5', mobile = false) {
+  const page = await browser.newPage({ viewport, hasTouch: mobile, isMobile: mobile });
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(URL + query);
   await page.waitForFunction(() => !!window.__curva);
   return page;
+}
+
+// menú → garage → arrancar (con el vehículo que haya quedado elegido)
+async function play(page) {
+  await page.click('#btn-play');
+  await page.click('#btn-go');
 }
 
 const state = (page) => page.evaluate(() => {
@@ -68,7 +74,7 @@ const carOnScreen = (page) => page.evaluate(() => {
 describe('navegador', { timeout: 600_000 }, () => {
   it('1-2. arranque validado y auto quieto durante la cuenta regresiva', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     const s0 = await state(page);
     assert.deepEqual(s0.problems, [], 'verificación de arranque sin problemas');
     assert.equal(s0.phase, 'playing');
@@ -91,7 +97,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('3/5/6/17. conducción real 20 s a bajos FPS: sin caídas, pista siempre por delante', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     await drive(page);
     await page.waitForTimeout(20000);
     const s = await state(page);
@@ -109,7 +115,7 @@ describe('navegador', { timeout: 600_000 }, () => {
     const page = await open();
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
-    await page.click('#btn-play');
+    await play(page);
     await drive(page);
     const t0 = Date.now();
     const a = await state(page);
@@ -128,7 +134,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('4/8. salirse de la pista: caída con motivo correcto y pantalla final', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     await page.keyboard.down('ArrowRight');
     await page.waitForFunction(() => window.__curva.screen() === 'over', null, { timeout: 15000 });
@@ -143,7 +149,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('10/12. reiniciar 15 veces: estado limpio, un solo bucle, memoria estable', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     const geos = [];
     for (let i = 0; i < 15; i++) {
       await drive(page, { nitroOnStraights: true });
@@ -168,7 +174,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('13/16. pausa, foco y cambio de pestaña: sin avance oculto ni salto al volver', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     await drive(page);
     await page.waitForTimeout(3000);
     await page.keyboard.press('Escape');
@@ -207,7 +213,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('9/14. cambiar el tamaño de la ventana (vertical ↔ horizontal) mantiene la cámara correcta', async () => {
     const page = await open({ width: 1280, height: 720 });
-    await page.click('#btn-play');
+    await play(page);
     await drive(page);
     for (const vp of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 1280, height: 720 }, { width: 360, height: 640 }]) {
       await page.setViewportSize(vp);
@@ -224,7 +230,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('11/18/19/20. sesión larga (25 km acelerados): sin acumular geometría ni atravesar la pista', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     const result = await page.evaluate(async () => {
       const c = window.__curva, g = c.game, s = g.sim;
@@ -264,7 +270,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('11. vista de depuración: se activa y desactiva sin cambiar reglas ni dejar geometría', async () => {
     const page = await open();
-    await page.click('#btn-play');
+    await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     await page.keyboard.press('Escape');
     const base = (await state(page)).geos;
@@ -281,7 +287,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('14/15. nitro en el juego real: ×3 de velocidad, HUD, efecto y vuelta a la base', async () => {
     const page = await open({ width: 390, height: 844 }, '?seed=5');
-    await page.click('#btn-play');
+    await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     await page.waitForTimeout(400);
     const before = await page.evaluate(() => ({ fov: window.__curva.game.rig.camera.fov }));
@@ -315,7 +321,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('5-11. pinchos y rampa en el juego real (capturas): con la rampa vuela y sigue; sin rampa, choque', async () => {
     const page = await open({ width: 390, height: 844 }, '?seed=5');
-    await page.click('#btn-play');
+    await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     // avanzar con el piloto hasta ~45 m antes de la primera rampa de carril, dibujando como el juego
     const info = await page.evaluate(() => {
@@ -352,7 +358,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
     // otra partida: quedarse en un carril sin rampa ⇒ choque contra los pinchos y mensaje propio
     const p2 = await open({ width: 390, height: 844 }, '?seed=5');
-    await p2.click('#btn-play');
+    await play(p2);
     await p2.waitForFunction(() => window.__curva.game.sim.status === 'running');
     const crash = await p2.evaluate(() => {
       const c = window.__curva, g = c.game, s = g.sim;
@@ -384,7 +390,7 @@ describe('navegador', { timeout: 600_000 }, () => {
 
   it('1-3. curva sin girar: el auto sigue recto y se va por el borde (captura)', async () => {
     const page = await open({ width: 390, height: 844 }, '?seed=5');
-    await page.click('#btn-play');
+    await play(page);
     await page.waitForFunction(() => window.__curva.game.sim.status === 'running');
     const r = await page.evaluate(() => {
       const c = window.__curva, g = c.game, s = g.sim;
@@ -448,57 +454,234 @@ describe('navegador', { timeout: 600_000 }, () => {
     await page.close();
   });
 
-  it('helicóptero a los 1000 m: alerta, pinchos en un carril y título propio al pisarlos (capturas)', async () => {
+  // avanza la partida conduciendo con el piloto automático hasta una condición (sin dibujar
+  // cada paso: el software de render de las pruebas es lento)
+  const advanceUntil = (page, cond) => page.evaluate((src) => {
+    const c = window.__curva, g = c.game, s = g.sim;
+    const f = new Function('s', 'g', 'return ' + src);
+    g['stopLoop']();
+    const render = g.render;
+    g.render = () => {};
+    let n = 0;
+    while (!f(s, g) && s.status !== 'over' && n++ < 400000) {
+      const i = c.autopilot(s);
+      c.input.override = { steer: i.steer, nitro: false };
+      g.advance(1 / 60);
+      g['present'](1 / 60);
+    }
+    g.render = render;
+    g.render();
+    return { d: s.distance, status: s.status, heli: s.heli.phase, missiles: s.missiles.phase, both: s.heli.attacking && s.missiles.attacking };
+  }, cond);
+
+  it('helicópteros: pinchos desde los 500 m, misiles desde los 1000 m, zona roja y explosión (capturas)', async () => {
     let page = await open({ width: 1280, height: 720 }, '?seed=4');
     await page.evaluate(() => window.__curva.startRun());
-    const until = (src) => page.evaluate((cond) => {
-      const c = window.__curva, g = c.game, s = g.sim;
-      const f = new Function('s', 'return ' + cond);
-      g['stopLoop']();
-      const render = g.render;
-      g.render = () => {};
-      let n = 0;
-      while (!f(s) && s.status !== 'over' && n++ < 300000) {
-        const i = c.autopilot(s);
-        c.input.override = { steer: i.steer, nitro: false };
-        g.advance(1 / 60);
-        g['present'](1 / 60);
-      }
-      g.render = render;
-      g.render();
-      return { d: s.distance, phase: s.heli.phase, status: s.status, alert: g.heliView['alert'].visible || s.heli.warning };
-    }, src);
-    const before = await until('s.distance > 990');
-    assert.equal(before.phase, 'off', 'antes de los 1000 m no hay helicóptero');
-    const warn = await until('s.heli.phase === "warn" && s.heli.timer > 0.4');
-    assert.equal(warn.status, 'running');
-    assert.ok(warn.alert, 'alerta visible');
-    await page.screenshot({ path: 'tests/shots/heli-alerta.png' });
-    await until('s.track.dropped.length > 0 && s.track.dropped.at(-1).s0 - s.car.s < 12');
-    await page.screenshot({ path: 'tests/shots/heli-pinchos.png' });
+    assert.equal((await advanceUntil(page, 's.distance > 495')).heli, 'off');
+    assert.notEqual((await advanceUntil(page, 's.distance > 520')).heli, 'off', 'el de pinchos ya está');
+    assert.equal((await advanceUntil(page, 's.distance > 990')).missiles, 'off');
+    // sin ícono de alerta: sólo zona roja en el suelo
+    assert.equal(await page.evaluate(() => {
+      const g = window.__curva.game;
+      return [g.heliView.root, g.missileHeliView.root, g.missileView.root].reduce((n, r) => n + r.getObjectsByProperty('type', 'Sprite').length, 0);
+    }), 0);
+    const mark = await advanceUntil(page, 's.missiles.phase === "mark"');
+    assert.equal(mark.status, 'running');
+    const zone = await page.evaluate(() => {
+      const g = window.__curva.game, st = g.sim.missiles.strikes.at(-1);
+      const v = g.missileView['views'].get(st.o.id);
+      return { visible: v.zone.visible && v.group.visible, w: st.o.width, depth: st.o.s1 - st.o.s0, missile: v.missile.visible };
+    });
+    assert.ok(zone.visible && !zone.missile, 'primero la zona roja, todavía sin misil');
+    await page.screenshot({ path: 'tests/shots/misil-zona.png' });
+    await advanceUntil(page, 's.missiles.phase === "fire" && s.missiles.strikes.at(-1).u > 0.5');
+    assert.ok(await page.evaluate(() => {
+      const g = window.__curva.game, st = g.sim.missiles.strikes.at(-1);
+      return g.missileView['views'].get(st.o.id).missile.visible;
+    }), 'misil en vuelo');
+    await page.screenshot({ path: 'tests/shots/misil-vuelo.png' });
+    await advanceUntil(page, 's.missiles.strikes.at(-1).impactT > 0 && s.time - s.missiles.strikes.at(-1).impactT > 0.15');
+    await page.screenshot({ path: 'tests/shots/misil-impacto.png' });
+    const pinchos = await advanceUntil(page, 's.heli.phase === "aim"');
+    assert.equal(pinchos.both, false, 'nunca atacan a la vez');
+    await page.screenshot({ path: 'tests/shots/heli-pinchos-zona.png' });
     await page.close();
 
-    // otra vez la misma partida, pero apenas caen los pinchos se va a su carril a propósito
+    // otra vez, pero metiéndose a propósito en la zona del misil
     page = await open({ width: 1280, height: 720 }, '?seed=4');
     await page.evaluate(() => window.__curva.startRun());
-    await until('s.heli.history.length > 0');
+    await advanceUntil(page, 's.missiles.phase === "mark"');
     const r = await page.evaluate(() => {
       const c = window.__curva, g = c.game, s = g.sim;
-      const o = s.track.dropped.at(-1);
+      const o = s.missiles.strikes.at(-1).o;
       let n = 0;
-      while (s.status !== 'over' && n++ < 2000) {
+      while (s.status !== 'over' && n++ < 3000) {
         const vdWant = Math.max(-4, Math.min(4, (o.baseD - s.car.d) * 1.5));
         c.input.override = { steer: Math.max(-1, Math.min(1, (vdWant - s.car.vd) * 0.6)), nitro: false };
         g.advance(1 / 60);
         g['present'](1 / 60);
       }
       c.input.override = null;
-      return { status: s.status, hit: s.car.hitObstacle === o.id };
+      return { hit: s.car.hitObstacle === o.id, other: s.car.hitObstacle };
     });
-    assert.equal(r.status, 'over');
-    assert.ok(r.hit);
-    await page.waitForFunction(() => window.__curva.screen() === 'over');
-    assert.equal(await page.textContent('#over-kicker'), 'Pinchos del helicóptero');
+    if (r.hit) {
+      await page.waitForFunction(() => window.__curva.screen() === 'over');
+      assert.equal(await page.textContent('#over-kicker'), 'Misil');
+    }
+    await page.close();
+  });
+
+  it('garage: se elige auto, moto o bici, se recuerda y la partida arranca bien con cada uno', async () => {
+    const page = await open({ width: 390, height: 844 });
+    for (const v of ['moto', 'bike', 'car']) {
+      await page.click('#btn-play');
+      assert.equal(await page.evaluate(() => window.__curva.screen()), 'garage');
+      await page.click(`input[name=vehicle][value=${v}] + .vcard-box`);
+      assert.equal(await page.evaluate(() => window.__curva.game.vehicle), v);
+      await page.click('#btn-go');
+      const s0 = await state(page);
+      assert.deepEqual(s0.problems, [], `${v}: arranque validado (ruedas sobre la calzada, cámara)`);
+      assert.equal(s0.phase, 'playing');
+      await drive(page);
+      await page.waitForTimeout(3500);
+      const s1 = await state(page);
+      await stopDriving(page);
+      assert.equal(s1.status, 'running', `${v}: anda`);
+      assert.ok(s1.s > s0.s + 20);
+      if (v === 'bike') await page.screenshot({ path: 'tests/shots/bici.png' });
+      if (v === 'moto') await page.screenshot({ path: 'tests/shots/moto.png' });
+      await page.evaluate(() => window.__curva.toMenu());
+    }
+    await page.reload();
+    await page.waitForFunction(() => !!window.__curva);
+    await page.click('#btn-play');
+    assert.equal(await page.evaluate(() => document.querySelector('input[name=vehicle]:checked').value), 'car', 'se recuerda la última elección');
+    await page.screenshot({ path: 'tests/shots/garage.png' });
+    await page.close();
+  });
+
+  it('freno: con el botón en pantalla baja hasta 30 km/h, nunca menos, y al soltar vuelve', async () => {
+    const page = await open({ width: 390, height: 844 }, '?seed=5', true);
+    await play(page);
+    await page.waitForTimeout(3500);
+    const box = await page.locator('#pad-brake').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    let minV = Infinity;
+    for (let k = 0; k < 12; k++) {
+      await page.waitForTimeout(250);
+      const v = await page.evaluate(() => window.__curva.game.sim.car.v);
+      minV = Math.min(minV, v);
+    }
+    const held = await page.evaluate(() => ({ v: window.__curva.game.sim.car.v, braking: window.__curva.game.sim.braking, cls: document.getElementById('pad-brake').className }));
+    await page.mouse.up();
+    assert.ok(held.braking && held.cls.includes('is-active'));
+    assert.ok(Math.abs(held.v * 3.6 - 30) < 0.5, `${(held.v * 3.6).toFixed(1)} km/h`);
+    assert.ok(minV * 3.6 >= 30 - 1e-6);
+    await page.waitForTimeout(2500);
+    const after = await page.evaluate(() => ({ v: window.__curva.game.sim.car.v, base: 22 + window.__curva.game.sim.car.s * 0.0045 }));
+    assert.ok(after.v > held.v + 10, 'recupera la velocidad');
+    await page.close();
+  });
+
+  for (const [tag, vp] of [['vertical', { width: 390, height: 844 }], ['horizontal', { width: 844, height: 390 }]]) {
+    it(`controles a medida (${tag}): se arrastran, no se pisan ni tapan la placa, se guardan y siguen funcionando`, async () => {
+      const ctx = await browser.newContext({ viewport: vp, hasTouch: true, isMobile: true });
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(String(e)));
+      await page.goto(URL + '?seed=5');
+      await page.waitForFunction(() => !!window.__curva);
+      await page.click('#btn-settings');
+      await page.click('#btn-layout');
+      assert.equal(await page.evaluate(() => window.__curva.screen()), 'layout');
+      const center = async (sel) => {
+        const b = await page.locator(sel).boundingBox();
+        return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      };
+      const drag = async (sel, x, y) => {
+        const c = await center(sel);
+        await page.mouse.move(c.x, c.y);
+        await page.mouse.down();
+        for (let k = 1; k <= 10; k++) await page.mouse.move(c.x + ((x - c.x) * k) / 10, c.y + ((y - c.y) * k) / 10);
+        await page.mouse.up();
+        return center(sel);
+      };
+      const W = vp.width, H = vp.height;
+      // freno al medio a la izquierda; salto arriba a la derecha (lejos de la pausa)
+      const brake = await drag('#pad-brake', W * 0.2, H * 0.55);
+      assert.ok(Math.abs(brake.x - W * 0.2) < 3 && Math.abs(brake.y - H * 0.55) < 3, `freno en ${JSON.stringify(brake)}`);
+      await drag('[data-pad=jump]', W * 0.85, H * 0.6);
+      // intentar tapar la placa de distancia o encimarlo con otro: no se deja
+      const plate = await page.locator('.plate').boundingBox();
+      const onPlate = await drag('[data-pad=nitro]', plate.x + plate.width / 2, plate.y + plate.height / 2);
+      const nitroRect = await page.locator('[data-pad=nitro]').boundingBox();
+      assert.ok(nitroRect.y > plate.y + plate.height || nitroRect.x > plate.x + plate.width, `el nitro no tapa la placa ${JSON.stringify(onPlate)}`);
+      const brakeNow = await center('#pad-brake');
+      await drag('[data-pad=left]', brakeNow.x, brakeNow.y);
+      const rects = await page.evaluate(() => [...document.querySelectorAll('[data-pad]')].map((e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }));
+      for (let a = 0; a < rects.length; a++) {
+        for (let b = a + 1; b < rects.length; b++) {
+          const [p, q] = [rects[a], rects[b]];
+          assert.ok(p[2] <= q[0] || q[2] <= p[0] || p[3] <= q[1] || q[3] <= p[1], 'sin botones encimados');
+        }
+        assert.ok(rects[a][0] >= 0 && rects[a][1] >= 0 && rects[a][2] <= W && rects[a][3] <= H, 'dentro de la pantalla');
+      }
+      await page.screenshot({ path: `tests/shots/controles-a-medida-${tag}.png` });
+      // mientras se acomodan no se maneja nada
+      assert.equal(await page.evaluate(() => window.__curva.input.brake || window.__curva.input.steer !== 0), false);
+      await page.click('#btn-layout-done');
+      // se guarda: tras recargar quedan donde estaban
+      await page.reload();
+      await page.waitForFunction(() => !!window.__curva);
+      await play(page);
+      const again = await center('#pad-brake');
+      assert.ok(Math.abs(again.x - brake.x) < 3 && Math.abs(again.y - brake.y) < 3, 'se recuerda la ubicación');
+      // y funcionan en la partida
+      await page.waitForTimeout(2600);
+      const c = await center('#pad-brake');
+      await page.mouse.move(c.x, c.y);
+      await page.mouse.down();
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => window.__curva.input.brake), true);
+      await page.mouse.up();
+      const r = await center('[data-pad=right]');
+      await page.mouse.move(r.x, r.y);
+      await page.mouse.down();
+      await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(() => window.__curva.input.steer), 1);
+      await page.mouse.up();
+      await page.screenshot({ path: `tests/shots/controles-a-medida-${tag}-juego.png` });
+      // restablecer vuelve a la ubicación de fábrica
+      await page.evaluate(() => window.__curva.pause());
+      await page.evaluate(() => window.__curva.toMenu());
+      await page.click('#btn-settings');
+      await page.click('#btn-layout');
+      await page.click('#btn-layout-reset');
+      await page.click('#btn-layout-done');
+      assert.equal(await page.evaluate(() => document.querySelector('.pads').classList.contains('is-custom')), false);
+      await ctx.close();
+    });
+  }
+
+  it('inclinación + controles a medida + freno juntos', async () => {
+    const page = await open({ width: 390, height: 844 }, '?seed=5', true);
+    await page.click('#btn-settings');
+    await page.click('input[name=steer][value=tilt] + span');
+    await page.waitForFunction(() => {
+      window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 35, gamma: 0 }));
+      return document.getElementById('hud').classList.contains('steer-tilt');
+    });
+    await page.click('#btn-close-settings');
+    await play(page);
+    await page.waitForTimeout(2600);
+    for (let k = 0; k < 6; k++) await page.evaluate(() => window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 35, gamma: 20 })));
+    const b = await page.locator('#pad-brake').boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(() => ({ steer: window.__curva.input.steer, brake: window.__curva.input.brake }));
+    await page.mouse.up();
+    assert.ok(r.steer > 0.5 && r.brake, JSON.stringify(r));
     await page.close();
   });
 

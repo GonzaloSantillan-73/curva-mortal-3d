@@ -6,7 +6,8 @@ import '@fontsource/barlow/600.css';
 import './style.css';
 import { Game, type HudState, type RunResult } from './Game.ts';
 import { InputManager } from './InputManager.ts';
-import { StorageManager, type PadSize, type Quality, type SteerMode } from './StorageManager.ts';
+import { PadLayout } from './PadLayout.ts';
+import { StorageManager, type PadSize, type Quality, type SteerMode, type Vehicle } from './StorageManager.ts';
 import { autopilot } from './core/autopilot.ts';
 import { validateTrack } from './core/validate.ts';
 import { emptyPoint } from './core/track.ts';
@@ -19,6 +20,8 @@ const screens = {
   pause: $('pause'),
   over: $('over'),
   settings: $('settings'),
+  garage: $('garage'),
+  layout: $('layout'),
 };
 type ScreenName = keyof typeof screens;
 
@@ -33,7 +36,9 @@ let runs = 0;
 
 function show(name: ScreenName) {
   current = name;
-  for (const [k, el] of Object.entries(screens)) el.classList.toggle('is-active', k === name || (k === 'hud' && (name === 'pause')));
+  for (const [k, el] of Object.entries(screens)) el.classList.toggle('is-active', k === name || (k === 'hud' && (name === 'pause' || name === 'layout')));
+  // con el HUD a la vista se puede comprobar todo (placa, pausa): se vuelve a ubicar
+  if (name === 'hud' && !padLayout.editing) padLayout.apply();
 }
 
 function refreshBest() {
@@ -58,10 +63,27 @@ function startRun() {
   // iOS sólo da permiso de inclinación desde un gesto: "Arrancar" lo es
   if (input.mode === 'tilt' && !tiltReady) void applySteer('tilt');
   game.start(params.has('seed') ? Number(params.get('seed')) : undefined);
-  if (runs === 1) tip('El auto no dobla solo: girá vos en las curvas', 3400);
+  if (runs === 1) tip('No dobla solo: girá vos en las curvas', 3400);
   else if (runs === 2) tip('Pinchos: subí a la rampa de un carril', 3400);
   else if (runs === 3) tip('Nitro ×3 en rectas — en curva te vas', 3400);
+  else if (runs === 4) tip('Freno: mantenelo para bajar a 30 km/h', 3400);
 }
+
+// ---------- garage ----------
+
+const vehicleRadios = [...document.querySelectorAll<HTMLInputElement>('input[name=vehicle]')];
+function chooseVehicle(v: Vehicle) {
+  StorageManager.setVehicle(v);
+  for (const r of vehicleRadios) r.checked = r.value === v;
+  game.setVehicle(v);
+}
+function openGarage() {
+  game.sfx.unlock();
+  chooseVehicle(StorageManager.getVehicle());
+  show('garage');
+  vehicleRadios.find((r) => r.checked)?.focus({ preventScroll: true });
+}
+for (const r of vehicleRadios) r.addEventListener('change', () => chooseVehicle(r.value as Vehicle));
 
 function pause() {
   if (game.phase !== 'playing') return;
@@ -90,6 +112,8 @@ const elDebug = $('debug-panel') as HTMLPreElement;
 const elNitro = $('hud-nitro'), elNitroFill = $('hud-nitro-fill'), elPadNitro = $('pad-nitro'), elSpeedFx = $('speedfx');
 const probeDbg = emptyPoint();
 let lastNitro = '';
+let lastBrake = '';
+const elPadBrake = $('pad-brake');
 
 game.onHud = (h: HudState) => {
   const key = `${Math.floor(h.distance)}|${Math.round(h.speedKmh)}|${h.coins}|${h.countdown > 0 ? Math.ceil(h.countdown * 2) : 0}`;
@@ -117,6 +141,12 @@ game.onHud = (h: HudState) => {
     }
     elSpeedFx.classList.toggle('is-on', h.nitro);
   }
+  const bk = `${h.braking}|${h.brakeBlocked}`;
+  if (bk !== lastBrake) {
+    lastBrake = bk;
+    elPadBrake.classList.toggle('is-active', h.braking);
+    elPadBrake.classList.toggle('is-blocked', h.brakeBlocked);
+  }
   if (!elDebug.hidden) {
     const s = game.sim, c = s.car;
     elDebug.textContent = [
@@ -134,8 +164,10 @@ game.onHud = (h: HudState) => {
   }
 };
 
-game.onHeli = (what) => {
-  if (what === 'enter') tip('¡Helicóptero! Cuando avise, esquivá los pinchos', 3400);
+game.onHeli = (who, what) => {
+  if (what !== 'enter') return;
+  if (who === 'caltrops') tip('¡Helicóptero! Esquivá los pinchos de la zona roja', 3400);
+  else tip('¡Misiles! Salí del carril marcado en rojo', 3400);
 };
 
 const TITLES: Record<string, [string, string]> = {
@@ -144,6 +176,7 @@ const TITLES: Record<string, [string, string]> = {
   crash: ['Choque', 'Te comiste el bloque'],
   spikes: ['Pinchos', 'Había que subir a la rampa'],
   caltrops: ['Pinchos del helicóptero', 'Te reventaron las gomas'],
+  missile: ['Misil', 'Te alcanzó en la zona roja'],
   ramp: ['Choque', 'Le pegaste al costado de la rampa'],
 };
 
@@ -152,7 +185,7 @@ game.onOver = (r: RunResult) => {
   const dist = Math.floor(r.distance);
   const record = dist > best;
   if (record) StorageManager.setHighScore(dist);
-  const key = r.reason === 'crash' && (r.hit === 'spikes' || r.hit === 'ramp' || r.hit === 'caltrops') ? r.hit : r.reason ?? 'side';
+  const key = r.reason === 'crash' && (r.hit === 'spikes' || r.hit === 'ramp' || r.hit === 'caltrops' || r.hit === 'missile') ? r.hit : r.reason ?? 'side';
   const [kicker, title] = TITLES[key] ?? TITLES.side;
   $('over-kicker').textContent = kicker;
   $('over-title').textContent = title;
@@ -168,7 +201,9 @@ game.onOver = (r: RunResult) => {
 
 // ---------- eventos ----------
 
-$('btn-play').addEventListener('click', startRun);
+$('btn-play').addEventListener('click', openGarage);
+$('btn-go').addEventListener('click', startRun);
+$('btn-garage-back').addEventListener('click', () => show('menu'));
 $('btn-retry').addEventListener('click', startRun);
 $('btn-restart').addEventListener('click', startRun);
 $('btn-pause').addEventListener('click', pause);
@@ -184,6 +219,34 @@ const PAD_PX: Record<PadSize, number> = { s: 60, m: 72, l: 88, xl: 104 };
 function applyPadSize(p: PadSize) {
   document.querySelector<HTMLElement>('.pads')?.style.setProperty('--pad-size', PAD_PX[p] + 'px');
   document.getElementById('hud')?.style.setProperty('--pad-size', PAD_PX[p] + 'px');
+  // con otro tamaño, la ubicación guardada puede dejar de servir: se vuelve a comprobar
+  if (!padLayout.editing) padLayout.apply();
+}
+
+// ubicación de los controles: se arrastran con el dedo; se guarda por orientación
+const padLayout = new PadLayout(document.querySelector<HTMLElement>('.pads')!);
+function openLayout() {
+  show('layout');
+  $('layout-orient').textContent = PadLayout.orientation() === 'portrait'
+    ? 'Se guarda para el celular en vertical. En horizontal se acomodan aparte.'
+    : 'Se guarda para el celular en horizontal. En vertical se acomodan aparte.';
+  padLayout.startEdit();
+}
+$('btn-layout').addEventListener('click', openLayout);
+$('btn-layout-done').addEventListener('click', () => {
+  padLayout.finishEdit(true);
+  show('settings');
+});
+$('btn-layout-reset').addEventListener('click', () => padLayout.restoreDefault());
+function onResize() {
+  game.resize();
+  if (padLayout.editing) {
+    // cambió la orientación mientras se editaba: se sigue con la de la nueva orientación
+    padLayout.finishEdit(false);
+    openLayout();
+  } else {
+    padLayout.apply();
+  }
 }
 // dirección en el celular: botones en pantalla o inclinación; se recuerda
 const elSteerNote = $('steer-note');
@@ -261,7 +324,9 @@ window.addEventListener('keydown', (e) => {
   } else if (e.code === 'Escape' || e.code === 'KeyP') {
     if (current === 'hud') pause();
     else if (current === 'pause') resume();
-  } else if (e.code === 'Enter' && (current === 'menu' || current === 'over')) {
+  } else if (e.code === 'Enter' && current === 'menu') {
+    openGarage();
+  } else if (e.code === 'Enter' && (current === 'garage' || current === 'over')) {
     startRun();
   }
 });
@@ -273,13 +338,15 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('blur', pause);
 
-new ResizeObserver(() => game.resize()).observe($('app'));
-window.addEventListener('orientationchange', () => game.resize());
+new ResizeObserver(onResize).observe($('app'));
+window.addEventListener('orientationchange', onResize);
 
 // ---------- arranque ----------
 
 refreshBest();
+game.setVehicle(StorageManager.getVehicle());
 game.preview(1);
+padLayout.apply();
 if (params.has('debug')) setDebug(true);
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
@@ -287,4 +354,4 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 }
 
 // API para pruebas automatizadas en el navegador
-(window as unknown as { __curva: unknown }).__curva = { game, input, autopilot, validateTrack, startRun, pause, resume, toMenu, screen: () => current };
+(window as unknown as { __curva: unknown }).__curva = { game, input, autopilot, validateTrack, startRun, pause, resume, toMenu, openGarage, padLayout, screen: () => current };

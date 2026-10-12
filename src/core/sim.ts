@@ -1,14 +1,15 @@
 import {
-  COUNTDOWN, CRASH_TIME, FALL_DEPTH, FALL_TIME, KEEP_BEHIND, NITRO_COIN, NITRO_DURATION,
+  ATTACK_GAP, BRAKE_CLEAR, BRAKE_MIN_SPEED, COUNTDOWN, CRASH_TIME, FALL_DEPTH, FALL_TIME, KEEP_BEHIND, NITRO_COIN, NITRO_DURATION,
   NITRO_MIN_START, NITRO_MULT, NITRO_RECHARGE, START_S, baseSpeedAt, requiredAhead,
 } from './config.ts';
 import { Generator } from './generator.ts';
 import { Helicopter } from './heli.ts';
+import { MissileHeli } from './missile.ts';
 import {
   computePose, createCar, emptyPose, placeCar, stepCar,
   type CarInput, type CarPose, type CarState, type EndReason,
 } from './physics.ts';
-import { Track, emptyPoint, type Segment } from './track.ts';
+import { Track, emptyPoint, type LaneRamp, type Segment } from './track.ts';
 import { validateTrack, type Issue } from './validate.ts';
 
 export type SimStatus = 'countdown' | 'running' | 'over';
@@ -19,17 +20,24 @@ export type SimEvent =
   | { type: 'land'; impact: number }
   | { type: 'crash' }
   | { type: 'nitro'; on: boolean }
-  | { type: 'heli'; what: 'enter' | 'warn' | 'drop' }
+  | { type: 'heli'; who: 'caltrops' | 'missiles'; what: 'enter' | 'warn' | 'drop' | 'mark' | 'fire' | 'impact' }
   | { type: 'fall'; reason: EndReason }
   | { type: 'over'; reason: EndReason };
 
 const JUMP_BUFFER = 0.12;
+const TURN_WAIT = 12;
 
 export class Simulation {
   readonly track = new Track();
   readonly gen = new Generator(this.track, 1);
   readonly car: CarState = createCar();
   readonly heli = new Helicopter();
+  readonly missiles = new MissileHeli();
+  // Coordinación de ataques: uno por vez y con un respiro entre uno y otro.
+  lastAttackEnd = -Infinity;
+  // Freno: el jugador lo mantiene pulsado; cerca de saltos y rampas no actúa.
+  braking = false;
+  brakeBlocked = false;
   readonly pose: CarPose = emptyPose();
   readonly prevPose: CarPose = emptyPose();
   status: SimStatus = 'countdown';
@@ -53,6 +61,7 @@ export class Simulation {
   private lastLandings = 0;
   private lastLaunches = 0;
   private readonly probe = emptyPoint();
+  private readonly ramps: LaneRamp[] = [];
   private readonly carInput: CarInput = { steer: 0, nitro: false, jump: false };
 
   // Construye la pista completa ANTES de colocar el auto. Nada avanza hasta que esto termina.
@@ -62,6 +71,12 @@ export class Simulation {
     while (this.track.endS < requiredAhead(START_S) + START_S) this.gen.generateNext();
     placeCar(this.car, this.track, START_S);
     this.heli.reset(seed);
+    this.missiles.reset(seed);
+    this.lastAttackEnd = -Infinity;
+    this.attackWas = null;
+    this.lastAttacker = null;
+    this.braking = false;
+    this.brakeBlocked = false;
     this.status = 'countdown';
     this.countdown = COUNTDOWN;
     this.time = 0;
@@ -91,9 +106,22 @@ export class Simulation {
     return Math.max(0, this.car.s - START_S);
   }
 
-  speedTarget(nitro: boolean): number {
+  speedTarget(nitro: boolean, brake = false): number {
     if (this.status === 'countdown') return 0;
+    if (brake) return BRAKE_MIN_SPEED;
     return baseSpeedAt(this.car.s) * (nitro ? NITRO_MULT : 1);
+  }
+
+  // ¿Hay un salto o una rampa cerca? Ahí el freno no actúa: hace falta velocidad.
+  private jumpNear(): boolean {
+    const car = this.car;
+    if (car.mode !== 'ground' || car.rampId >= 0) return true;
+    for (let k = 0; k <= BRAKE_CLEAR; k += 4) {
+      if (!this.track.sample(car.s + k, this.probe) || !this.probe.solid) return true;
+      const kind = this.probe.seg?.kind;
+      if (kind === 'ramp' || kind === 'gap') return true;
+    }
+    return this.track.rampsNear(car.s - 4, car.s + BRAKE_CLEAR, this.ramps).length > 0;
   }
 
   private updateNitro(dt: number, held: boolean) {
@@ -123,12 +151,16 @@ export class Simulation {
     const ci = this.carInput;
     const live = this.status === 'running';
     ci.steer = live ? Math.max(-1, Math.min(1, input.steer)) : 0;
-    this.updateNitro(dt, live && input.nitro);
+    // frenar apaga el nitro; cerca de saltos el freno no actúa
+    this.brakeBlocked = live && !!input.brake && this.jumpNear();
+    this.braking = live && !!input.brake && !this.brakeBlocked;
+    this.updateNitro(dt, live && input.nitro && !this.braking);
     ci.nitro = this.nitroActive && car.mode === 'ground';
+    ci.brake = this.braking;
     ci.jump = live && this.jumpBuffer > 0 && car.mode === 'ground';
     const modeBefore = car.mode;
 
-    stepCar(car, this.track, ci, dt, this.speedTarget(this.nitroActive), this.time);
+    stepCar(car, this.track, ci, dt, this.speedTarget(this.nitroActive, this.braking), this.time);
     this.time += dt;
     if (this.jumpBuffer > 0) this.jumpBuffer = car.mode === 'ground' ? this.jumpBuffer - dt : 0;
 
@@ -155,8 +187,7 @@ export class Simulation {
 
     this.collectCoins();
     this.maintainTrack();
-    const heli = this.heli.step(dt, this.track, car, this.time, this.status === 'running');
-    if (heli) this.events.push({ type: 'heli', what: heli });
+    this.stepHelicopters(dt);
 
     if (this.status === 'running') this.minAhead = Math.min(this.minAhead, this.ahead);
 
@@ -172,6 +203,32 @@ export class Simulation {
     }
     computePose(car, this.track, this.pose, dt);
   }
+
+  // Los dos helicópteros pueden estar a la vez, pero atacan de a uno: un ataque empieza
+  // sólo si el otro no está atacando y pasó ATTACK_GAP desde el último. Cada uno, antes de
+  // atacar, comprueba todos los obstáculos y peligros activos (también los del otro).
+  private stepHelicopters(dt: number) {
+    const running = this.status === 'running';
+    const car = this.car;
+    const rested = () => this.time - this.lastAttackEnd >= ATTACK_GAP;
+    // turnos: si los dos están en el aire, el que atacó último espera a que ataque el otro
+    // (salvo que el otro no encuentre dónde durante un buen rato)
+    const both = this.heli.phase === 'cruise' && this.missiles.phase === 'cruise';
+    const turn = (who: 'caltrops' | 'missiles') => !both || this.lastAttacker !== who || this.time - this.lastAttackEnd > TURN_WAIT;
+    const h1 = this.heli.step(dt, this.track, car, this.time, running, rested() && !this.missiles.attacking && turn('caltrops'));
+    if (h1) this.events.push({ type: 'heli', who: 'caltrops', what: h1 });
+    // terminar (o cancelar) un ataque deja un respiro antes del siguiente
+    if (this.attackWas === 'caltrops' && !this.heli.attacking) this.lastAttackEnd = this.time;
+    const h2 = this.missiles.step(dt, this.track, car, this.time, running, rested() && !this.heli.attacking && turn('missiles'));
+    if (h2) this.events.push({ type: 'heli', who: 'missiles', what: h2 });
+    if (this.attackWas === 'missiles' && !this.missiles.attacking) this.lastAttackEnd = this.time;
+    this.attackWas = this.heli.attacking ? 'caltrops' : this.missiles.attacking ? 'missiles' : null;
+    if (this.attackWas) this.lastAttacker = this.attackWas;
+  }
+
+  // quién estaba atacando al terminar el paso anterior
+  private attackWas: 'caltrops' | 'missiles' | null = null;
+  private lastAttacker: 'caltrops' | 'missiles' | null = null;
 
   private collectCoins() {
     const car = this.car;

@@ -8,16 +8,19 @@ import { FixedStepper } from './core/stepper.ts';
 import { emptyPoint } from './core/track.ts';
 import { CameraRig } from './render/CameraRig.ts';
 import { CarView } from './render/CarView.ts';
+import { TwoWheelView } from './render/TwoWheelView.ts';
 import { DebugView } from './render/DebugView.ts';
 import { Dust } from './render/Dust.ts';
 import { Environment } from './render/Environment.ts';
 import { HeliView } from './render/HeliView.ts';
+import { MissileView } from './render/MissileView.ts';
 import { TrackView } from './render/TrackView.ts';
 import { Sfx } from './Sfx.ts';
 import type { InputManager } from './InputManager.ts';
 
 export type Phase = 'idle' | 'playing' | 'paused' | 'over';
 export type Quality = 'low' | 'medium' | 'high';
+export type VehicleKind = 'car' | 'moto' | 'bike';
 
 export interface HudState {
   distance: number;
@@ -28,13 +31,15 @@ export interface HudState {
   nitro: boolean;
   nitroEnergy: number;   // 0…1
   nitroReady: boolean;   // hay energía suficiente para encenderlo
+  braking: boolean;
+  brakeBlocked: boolean; // pulsado cerca de un salto: no frena
 }
 
 export interface RunResult {
   distance: number;
   coins: number;
   reason: EndReason;
-  hit: 'spikes' | 'ramp' | 'block' | 'tires' | 'mover' | 'caltrops' | null;
+  hit: 'spikes' | 'ramp' | 'block' | 'tires' | 'mover' | 'caltrops' | 'missile' | null;
 }
 
 export interface LoopStats {
@@ -59,18 +64,22 @@ export class Game {
   readonly scene = new THREE.Scene();
   readonly rig: CameraRig;
   readonly trackView: TrackView;
-  readonly carView: CarView;
+  carView: CarView | TwoWheelView;
+  vehicle: VehicleKind = 'car';
+  private shadows: boolean;
   readonly env: Environment;
   readonly debug = new DebugView();
   readonly dust: Dust;
   readonly heliView: HeliView;
+  readonly missileHeliView: HeliView;
+  readonly missileView: MissileView;
   readonly sfx = new Sfx();
   phase: Phase = 'idle';
   stats: LoopStats = { frames: 0, steps: 0, maxStepsInFrame: 0, clampedFrames: 0, loopStarts: 0, activeLoops: 0 };
   lastStartProblems: string[] = [];
   onHud?: (h: HudState) => void;
   onOver?: (r: RunResult) => void;
-  onHeli?: (what: 'enter' | 'warn' | 'drop') => void;
+  onHeli?: (who: 'caltrops' | 'missiles', what: 'enter' | 'warn' | 'drop' | 'mark' | 'fire' | 'impact') => void;
 
   private input: InputManager;
   private container: HTMLElement;
@@ -80,7 +89,7 @@ export class Game {
   private renderPose: CarPose = emptyPose();
   private focus = new THREE.Vector3();
   private probe = emptyPoint();
-  private carInput: CarInput = { steer: 0, nitro: false, jump: false };
+  private carInput: CarInput = { steer: 0, nitro: false, jump: false, brake: false };
 
   constructor(container: HTMLElement, input: InputManager, quality: Quality) {
     this.container = container;
@@ -98,10 +107,14 @@ export class Game {
     this.rig = new CameraRig(this.sim.track);
     this.env = new Environment(this.scene, shadows);
     this.trackView = new TrackView(this.sim.track, shadows);
+    this.shadows = shadows;
     this.carView = new CarView(shadows);
     this.dust = new Dust();
-    this.heliView = new HeliView(this.sim.track, shadows);
-    this.scene.add(this.trackView.root, this.carView.root, this.carView.shadow, this.dust.root, this.heliView.root, this.debug.root);
+    this.heliView = new HeliView(this.sim.track, shadows, 'caltrops');
+    this.missileHeliView = new HeliView(this.sim.track, shadows, 'missiles');
+    this.missileView = new MissileView(this.sim.track);
+    this.scene.add(this.trackView.root, this.carView.root, this.carView.shadow, this.dust.root, this.heliView.root,
+      this.missileHeliView.root, this.missileView.root, this.debug.root);
     this.resize();
   }
 
@@ -170,6 +183,18 @@ export class Game {
     }
   }
 
+  // Cambia el vehículo que se dibuja. La física es la misma para los tres.
+  setVehicle(kind: VehicleKind) {
+    if (kind === this.vehicle) return;
+    this.vehicle = kind;
+    this.scene.remove(this.carView.root, this.carView.shadow);
+    this.carView.dispose();
+    this.carView = kind === 'car' ? new CarView(this.shadows) : new TwoWheelView(kind, this.shadows);
+    this.scene.add(this.carView.root, this.carView.shadow);
+    this.applyPose(this.phase === 'playing' ? this.stepper.alpha : 0);
+    if (this.phase !== 'playing') this.render();
+  }
+
   // ---------- internos ----------
 
   private prepare(seed: number) {
@@ -182,6 +207,8 @@ export class Game {
     if (!this.debug.enabled) this.debug.clear();
     this.dust.clear();
     this.heliView.clear();
+    this.missileHeliView.clear();
+    this.missileView.clear();
     Object.assign(this.renderPose, this.sim.pose);
     this.applyPose(0);
     this.rig.snap(this.renderPose);
@@ -260,6 +287,7 @@ export class Game {
     const inp = this.carInput;
     inp.steer = this.input.steer;
     inp.nitro = this.input.nitro;
+    inp.brake = this.input.brake;
     const steps = this.stepper.advance(frameDt, (i) => {
       inp.jump = i === 0 ? this.input.consumeJump() : false;
       this.sim.step(FIXED_DT, inp);
@@ -286,16 +314,20 @@ export class Game {
       }
       if (e.type === 'nitro') this.sfx.nitro(e.on);
       if (e.type === 'launch') this.sfx.launch();
-      if (e.type === 'heli') this.onHeli?.(e.what);
-      if (e.type === 'heli' && e.what === 'warn') this.sfx.alert();
+      if (e.type === 'heli') this.onHeli?.(e.who, e.what);
+      if (e.type === 'heli' && (e.what === 'warn' || e.what === 'mark')) this.sfx.alert();
       if (e.type === 'heli' && e.what === 'drop') this.sfx.drop();
+      if (e.type === 'heli' && e.what === 'fire') this.sfx.launch();
+      if (e.type === 'heli' && e.what === 'impact') this.sfx.boom();
     }
     this.applyPose(this.stepper.alpha);
     const falling = sim.car.mode === 'falling';
     this.rig.update(dt, this.renderPose, falling, sim.nitroActive ? 1 : 0, sim.car.v);
     this.dust.update(dt);
     this.trackView.update(sim.time);
-    this.heliView.update(sim.heli, this.stepper.alpha, sim.time, sim.car.v, this.rig.camera);
+    this.heliView.update(sim.heli, this.stepper.alpha, sim.time, sim.car.v);
+    this.missileHeliView.update(sim.missiles, this.stepper.alpha, sim.time, sim.car.v);
+    this.missileView.update(sim.missiles, sim.time);
     this.debug.update(sim, this.renderPose);
     this.render();
 
@@ -308,6 +340,8 @@ export class Game {
       nitro: sim.nitroActive,
       nitroEnergy: sim.nitroEnergy,
       nitroReady: sim.nitroActive || sim.nitroEnergy >= NITRO_MIN_START,
+      braking: sim.braking,
+      brakeBlocked: sim.brakeBlocked,
     });
 
     if (sim.status === 'over') {
@@ -320,7 +354,8 @@ export class Game {
 
   private hitKind(): RunResult['hit'] {
     const id = this.sim.car.hitObstacle;
-    if (this.sim.track.dropped.some((o) => o.id === id)) return 'caltrops';
+    const dropped = this.sim.track.dropped.find((o) => o.id === id);
+    if (dropped) return dropped.kind;
     if (id < 0) return null;
     for (const seg of this.sim.track.segments) {
       const o = seg.obstacles.find((q) => q.id === id);

@@ -2,6 +2,7 @@ import { CAR_LENGTH, CAR_WIDTH, DECEL, GRIP, NITRO_ACCEL, NITRO_MULT, STEER_IN, 
 import type { CarInput } from './physics.ts';
 import type { Simulation } from './sim.ts';
 import { emptyPoint, type LaneRamp, type Obstacle } from './track.ts';
+import { lateralSlope } from './validate.ts';
 
 // Conductor de prueba: sólo lee el estado público de la simulación y produce entradas
 // como lo haría un jugador (volante -1…1, nitro, salto). No toca la física: para seguir
@@ -97,6 +98,77 @@ function freeGaps(row: Obstacle[], hw: number): Gap[] {
   return free;
 }
 
+function mergeGaps(list: Gap[]): Gap[] {
+  const sorted = list.filter((r) => r.b > r.a).sort((p, q) => p.a - q.a);
+  const out: Gap[] = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && r.a <= last.b) last.b = Math.max(last.b, r.b);
+    else out.push({ ...r });
+  }
+  return out;
+}
+
+function cut(list: Gap[], lo: number, hi: number): Gap[] {
+  return list.flatMap((r) => {
+    if (r.b <= lo || r.a >= hi) return [r];
+    const out = [];
+    if (r.a < lo) out.push({ a: r.a, b: lo });
+    if (r.b > hi) out.push({ a: hi, b: r.b });
+    return out;
+  });
+}
+
+// Planificador principal: el mismo modelo que el validador de la pista, recorrido hacia
+
+// Plan B cuando el plan por filas no es alcanzable: el mismo modelo que el validador de la
+// pista, recorrido hacia atrás desde lo más lejano visible. Da el "pasillo" de posiciones
+// laterales desde las que todavía se puede pasar todo lo que sigue y apunta a su punto más
+// cercano en el tramo inmediato (en vez de quedarse quieto y caer en una trampa).
+function corridorTarget(sim: Simulation, rows: Obstacle[], look: number): number | null {
+  const car = sim.car;
+  const track = sim.track;
+  const lim = track.halfWidth - 0.6;
+  const v = Math.max(car.v, 1);
+  const end = car.s + look;
+  const aim = car.s + v * 0.45;
+  for (const k of [0.55, 0.8]) {
+    let set: Gap[] = [{ a: -lim, b: lim }];
+    // lo que vale en TODO el tramo inmediato (del auto al punto de mira), no sólo al final
+    let atAim: Gap[] | null = null;
+    let near: Gap[] = [];
+    for (let s = end; s >= car.s; s -= 0.5) {
+      track.sample(s, probe);
+      const w = lateralSlope(v, probe.kappa) * k * 0.5;
+      set = mergeGaps(set.map((r) => ({ a: Math.max(-lim, r.a - w), b: Math.min(lim, r.b + w) })));
+      for (const o of rows) {
+        if (s < o.s0 - CAR_LENGTH / 2 - 0.3 || s > o.s1 + CAR_LENGTH / 2 + 0.3) continue;
+        const m = o.width / 2 + o.amp + CAR_WIDTH / 2 + 0.4;
+        set = cut(set, o.baseD - m, o.baseD + m);
+      }
+      if (!set.length) break;
+      if (s <= aim) {
+        atAim = atAim ? intersectAll(atAim, set) : set.map((r) => ({ ...r }));
+        near = set;
+      }
+    }
+    if (!set.length || !atAim) continue;
+    if (!atAim.length) atAim = near;
+    if (!set.some((r) => car.d >= r.a - 0.4 && car.d <= r.b + 0.4)) continue;
+    let best = car.d, dist = Infinity;
+    for (const r of atAim) {
+      const inset = Math.min(0.5, (r.b - r.a) / 2);
+      const c = Math.min(Math.max(car.d, r.a + inset), r.b - inset);
+      if (Math.abs(c - car.d) < dist) {
+        dist = Math.abs(c - car.d);
+        best = c;
+      }
+    }
+    return best;
+  }
+  return null;
+}
+
 export function autopilot(sim: Simulation, opts: AutopilotOptions = {}): CarInput {
   const car = sim.car;
   const track = sim.track;
@@ -105,7 +177,7 @@ export function autopilot(sim: Simulation, opts: AutopilotOptions = {}): CarInpu
   if (car.mode === 'falling' || car.mode === 'crashed') return input;
 
   let target = 0;
-  const look = Math.max(90, car.v * 4);
+  const look = Math.max(140, car.v * 5);
   // la rampa de carril es la única forma de pasar los pinchos; antes se esquiva lo que haya
   track.rampsNear(car.s - 2, car.s + Math.max(90, car.v * 3), ramps);
   const ramp = ramps.find((r) => r.s1 > car.s - 1);
@@ -137,7 +209,9 @@ export function autopilot(sim: Simulation, opts: AutopilotOptions = {}): CarInpu
     const reach0 = lateralReach(car.v, groups[0].s - car.s - 2, kNow) + 0.3;
     const near0 = (list: Gap[]) => intersectAll(list, [{ a: car.d - reach0, b: car.d + reach0 }]);
     const reachable = near0(feasible);
+    const planB = reachable.length ? null : corridorTarget(sim, rows, look);
     if (reachable.length) feasible = reachable;
+    else if (planB !== null) feasible = [{ a: planB, b: planB }];
     else if (near0(groups[0].free).length) feasible = groups[0].free.filter((r) => near0([r]).length);
     let best = Infinity;
     for (const r of feasible) {
